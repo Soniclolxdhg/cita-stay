@@ -1,5 +1,5 @@
-import React from 'react';
-import { Moon, DollarSign, Heart, Sparkles, MapPin } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Moon, DollarSign, Heart } from 'lucide-react';
 
 export default function TripBanner({
   tripName,
@@ -12,6 +12,33 @@ export default function TripBanner({
 }) {
   const p1 = partners.partner1 || { name: 'Cami', avatar: '🌸' };
   const p2 = partners.partner2 || { name: 'Nico', avatar: '🐻' };
+
+  // Local state for free typing & backspacing in the input
+  const [localNights, setLocalNights] = useState(String(nights || 3));
+
+  useEffect(() => {
+    setLocalNights(String(nights || 3));
+  }, [nights]);
+
+  const handleNightsChange = (e) => {
+    const raw = e.target.value;
+    setLocalNights(raw);
+    const parsed = parseInt(raw, 10);
+    if (!isNaN(parsed) && parsed >= 1 && parsed <= 90) {
+      onUpdateTrip({ nights: parsed });
+    }
+  };
+
+  const handleNightsBlur = () => {
+    const parsed = parseInt(localNights, 10);
+    if (isNaN(parsed) || parsed < 1) {
+      setLocalNights('1');
+      onUpdateTrip({ nights: 1 });
+    } else {
+      setLocalNights(String(parsed));
+      onUpdateTrip({ nights: parsed });
+    }
+  };
 
   return (
     <section className="trip-banner">
@@ -33,16 +60,18 @@ export default function TripBanner({
           </div>
         )}
 
-        {/* Nights Selector */}
+        {/* Nights Selector with smooth backspacing/typing */}
         <div className="config-item" title="Cambia la cantidad de noches para calcular el total automático">
           <Moon size={15} color="#A855F7" />
           <span>Noches:</span>
           <input
             type="number"
             min="1"
-            max="60"
-            value={nights}
-            onChange={(e) => onUpdateTrip({ nights: parseInt(e.target.value, 10) || 1 })}
+            max="90"
+            value={localNights}
+            onChange={handleNightsChange}
+            onBlur={handleNightsBlur}
+            style={{ width: '48px' }}
           />
         </div>
 

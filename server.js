@@ -263,13 +263,120 @@ app.post('/api/auth/join-space', (req, res) => {
   res.json({ success: true, space, partnerId });
 });
 
+// Auth: Google Sign-In & Persistence
+app.post('/api/auth/google', (req, res) => {
+  const { email, name, picture, sub, partnerName = '', spaceName = '' } = req.body;
+
+  if (!email) {
+    return res.status(400).json({ error: 'Email de Google requerido' });
+  }
+
+  const cleanEmail = email.toLowerCase().trim();
+
+  // Search if a space already exists linked to this Google email
+  const existingId = Object.keys(spacesCache).find((id) => {
+    return spacesCache[id]?.googleOwner?.email?.toLowerCase().trim() === cleanEmail;
+  });
+
+  if (existingId) {
+    return res.json({
+      success: true,
+      space: spacesCache[existingId],
+      isNew: false,
+      message: `¡Bienvenido de nuevo, ${name || 'Google User'}! Recuperamos tu nido.`
+    });
+  }
+
+  // Create new space linked permanently to this Google account
+  const randomDigits = Math.floor(1000 + Math.random() * 9000);
+  const cleanId = `AMOR-${randomDigits}`;
+
+  const userDisplayName = (name || cleanEmail.split('@')[0] || 'Tú').trim();
+  const partnerDisplayName = (partnerName || 'Mi Pareja').trim();
+
+  const newSpace = {
+    id: cleanId,
+    name: spaceName.trim() || `Escapada de ${userDisplayName} & ${partnerDisplayName} 💕`,
+    nights: 3,
+    currency: 'USD',
+    pin: '',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    googleOwner: {
+      email: cleanEmail,
+      name: userDisplayName,
+      picture: picture || '',
+      sub: sub || cleanEmail
+    },
+    partners: {
+      partner1: { id: 'p1', name: userDisplayName, avatar: '🌸', color: '#F472B6' },
+      partner2: { id: 'p2', name: partnerDisplayName, avatar: '🐻', color: '#818CF8' }
+    },
+    accommodations: []
+  };
+
+  spacesCache[cleanId] = newSpace;
+  saveSpaces();
+
+  res.status(201).json({
+    success: true,
+    space: newSpace,
+    isNew: true,
+    message: `¡Nido creado y vinculado exitosamente a tu cuenta de Google (${cleanEmail})!`
+  });
+});
+
+// Auth: Link Google account to an existing space
+app.post('/api/space/:spaceId/link-google', (req, res) => {
+  const { spaceId } = req.params;
+  const { email, name, picture } = req.body;
+  const cleanId = (spaceId || '').toUpperCase().trim();
+
+  if (!cleanId || !spacesCache[cleanId]) {
+    return res.status(404).json({ error: 'Espacio no encontrado' });
+  }
+
+  if (!email) {
+    return res.status(400).json({ error: 'Email de Google requerido' });
+  }
+
+  const cleanEmail = email.toLowerCase().trim();
+  spacesCache[cleanId].googleOwner = {
+    email: cleanEmail,
+    name: (name || cleanEmail.split('@')[0]).trim(),
+    picture: picture || ''
+  };
+  spacesCache[cleanId].updatedAt = new Date().toISOString();
+  saveSpaces();
+
+  res.json({ success: true, space: spacesCache[cleanId] });
+});
+
 // Get space data
 app.get('/api/space/:spaceId', (req, res) => {
   const { spaceId } = req.params;
   const cleanId = (spaceId || 'default').toUpperCase().trim();
 
   if (!spacesCache[cleanId]) {
-    spacesCache[cleanId] = createDefaultSpace(cleanId);
+    // Only load demo items for the official demo space AMOR-2026 or DEMO
+    if (cleanId === 'AMOR-2026' || cleanId === 'DEMO') {
+      spacesCache[cleanId] = createDefaultSpace(cleanId);
+    } else {
+      // For any custom space, NEVER overwrite with Cami & Nico!
+      spacesCache[cleanId] = {
+        id: cleanId,
+        name: 'Nuestra Escapada Romántica 💕',
+        nights: 3,
+        currency: 'USD',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        partners: {
+          partner1: { id: 'p1', name: 'Pareja 1', avatar: '🌸', color: '#F472B6' },
+          partner2: { id: 'p2', name: 'Pareja 2', avatar: '🐻', color: '#818CF8' }
+        },
+        accommodations: []
+      };
+    }
     saveSpaces();
   }
 

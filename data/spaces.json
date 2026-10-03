@@ -222,5 +222,35 @@
       }
     },
     "accommodations": []
+  },
+  "AMOR-2085": {
+    "id": "AMOR-2085",
+    "name": "Escapada de lucas.test & Mi Pareja 💕",
+    "nights": 3,
+    "currency": "USD",
+    "pin": "",
+    "createdAt": "2026-10-03T17:53:47.090Z",
+    "updatedAt": "2026-10-03T17:53:47.090Z",
+    "googleOwner": {
+      "email": "lucas.test@gmail.com",
+      "name": "lucas.test",
+      "picture": "https://api.dicebear.com/7.x/bottts/svg?seed=lucas.test@gmail.com",
+      "sub": "lucas.test@gmail.com"
+    },
+    "partners": {
+      "partner1": {
+        "id": "p1",
+        "name": "lucas.test",
+        "avatar": "🌸",
+        "color": "#F472B6"
+      },
+      "partner2": {
+        "id": "p2",
+        "name": "Mi Pareja",
+        "avatar": "🐻",
+        "color": "#818CF8"
+      }
+    },
+    "accommodations": []
   }
 }

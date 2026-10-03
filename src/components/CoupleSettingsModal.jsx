@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { X, Users, Copy, Check, Share2, Sparkles, Key, Smartphone } from 'lucide-react';
 
+import GoogleAuthModal from './GoogleAuthModal';
+
 const AVATARS_P1 = ['🌸', '🦊', '🐱', '🐰', '🥑', '🌺', '✨', '🍓'];
 const AVATARS_P2 = ['🐻', '🦁', '🐨', '🐼', '🌿', '🌊', '🚀', '☕'];
 
@@ -13,7 +15,9 @@ export default function CoupleSettingsModal({
   currentPartnerId = 'p1',
   onUpdateTrip,
   apiKey,
-  onUpdateApiKey
+  onUpdateApiKey,
+  googleOwner,
+  onLinkGoogle
 }) {
   const [localTripName, setLocalTripName] = useState(tripName || '');
   const [p1Name, setP1Name] = useState(partners.partner1?.name || 'Cami');
@@ -22,6 +26,7 @@ export default function CoupleSettingsModal({
   const [p2Avatar, setP2Avatar] = useState(partners.partner2?.avatar || '🐻');
   const [localKey, setLocalKey] = useState(apiKey || '');
   const [copied, setCopied] = useState(false);
+  const [isGoogleModalOpen, setIsGoogleModalOpen] = useState(false);
 
   if (!isOpen) return null;
 
@@ -218,6 +223,45 @@ export default function CoupleSettingsModal({
             </small>
           </div>
 
+          {/* Google Account Status / Link */}
+          {googleOwner?.email ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', background: '#F0FDF4', border: '1px solid #BBF7D0', padding: '0.75rem 0.9rem', borderRadius: 'var(--radius-md)', marginBottom: '1.25rem', fontSize: '0.82rem', color: '#166534' }}>
+              <svg width="20" height="20" viewBox="0 0 24 24" style={{ flexShrink: 0 }}>
+                <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.8-2.4 3.66v3.05h3.87c2.26-2.09 3.675-5.17 3.675-9.15z" />
+                <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.87-3.05c-1.08.72-2.45 1.16-4.06 1.16-3.13 0-5.78-2.11-6.73-4.96H1.27v3.15C3.26 21.36 7.36 24 12 24z" />
+                <path fill="#FBBC05" d="M5.27 14.24c-.25-.72-.38-1.49-.38-2.24s.13-1.52.38-2.24V6.61H1.27C.46 8.23 0 10.06 0 12s.46 3.77 1.27 5.39l4-3.15z" />
+                <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.36 0 3.26 2.64 1.27 6.61l4 3.15c.95-2.85 3.6-4.96 6.73-4.96z" />
+              </svg>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 700 }}>Guardado con Google</div>
+                <div style={{ color: '#15803D', fontSize: '0.78rem' }}>{googleOwner.email}</div>
+              </div>
+              <span style={{ fontSize: '0.75rem', background: '#DCFCE7', color: '#166534', padding: '0.2rem 0.5rem', borderRadius: 'var(--radius-pill)', fontWeight: 600 }}>
+                Protegido ✓
+              </span>
+            </div>
+          ) : (
+            <div style={{ background: '#F8FAFC', border: '1px solid #E2E8F0', padding: '0.75rem 0.9rem', borderRadius: 'var(--radius-md)', marginBottom: '1.25rem', fontSize: '0.82rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <svg width="20" height="20" viewBox="0 0 24 24" style={{ flexShrink: 0 }}>
+                  <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.8-2.4 3.66v3.05h3.87c2.26-2.09 3.675-5.17 3.675-9.15z" />
+                  <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.87-3.05c-1.08.72-2.45 1.16-4.06 1.16-3.13 0-5.78-2.11-6.73-4.96H1.27v3.15C3.26 21.36 7.36 24 12 24z" />
+                  <path fill="#FBBC05" d="M5.27 14.24c-.25-.72-.38-1.49-.38-2.24s.13-1.52.38-2.24V6.61H1.27C.46 8.23 0 10.06 0 12s.46 3.77 1.27 5.39l4-3.15z" />
+                  <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.36 0 3.26 2.64 1.27 6.61l4 3.15c.95-2.85 3.6-4.96 6.73-4.96z" />
+                </svg>
+                <span>Vincular con Google para no perder tus datos</span>
+              </div>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setIsGoogleModalOpen(true)}
+                style={{ fontSize: '0.78rem', padding: '0.35rem 0.75rem', whiteSpace: 'nowrap' }}
+              >
+                Vincular
+              </button>
+            </div>
+          )}
+
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1.5rem' }}>
             <button type="button" className="btn btn-secondary" onClick={onClose}>
               Cerrar
@@ -227,6 +271,17 @@ export default function CoupleSettingsModal({
             </button>
           </div>
         </form>
+
+        {/* Google Link Modal */}
+        <GoogleAuthModal
+          isOpen={isGoogleModalOpen}
+          onClose={() => setIsGoogleModalOpen(false)}
+          onGoogleSuccess={(data) => {
+            if (onLinkGoogle) {
+              onLinkGoogle(data.googleUser);
+            }
+          }}
+        />
       </div>
     </div>
   );

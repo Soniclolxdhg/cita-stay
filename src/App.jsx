@@ -177,6 +177,29 @@ export default function App() {
     showToast('Clave de IA guardada');
   };
 
+  const handleLinkGoogle = async (googleData) => {
+    try {
+      const res = await fetch(`/api/space/${spaceId}/link-google`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: googleData.email,
+          name: googleData.name,
+          picture: googleData.picture
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.space) {
+          setSpaceData(data.space);
+          showToast(`¡Espacio vinculado a Google (${googleData.email})! 🔐💕`);
+        }
+      }
+    } catch (err) {
+      console.error('Error linking Google:', err);
+    }
+  };
+
   // Add accommodation
   const handleAddAccommodation = async (newAcc) => {
     try {
@@ -517,6 +540,8 @@ export default function App() {
         onUpdateTrip={handleUpdateTrip}
         apiKey={apiKey}
         onUpdateApiKey={handleUpdateApiKey}
+        googleOwner={spaceData.googleOwner}
+        onLinkGoogle={handleLinkGoogle}
       />
 
       {/* Share & Invite Partner Modal */}
