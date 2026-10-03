@@ -174,5 +174,53 @@
         "comments": []
       }
     ]
+  },
+  "AMOR-5244": {
+    "id": "AMOR-5244",
+    "name": "Escapada de Lucas & Pareja 💕",
+    "nights": 3,
+    "currency": "USD",
+    "pin": "",
+    "createdAt": "2026-10-03T17:14:51.402Z",
+    "updatedAt": "2026-10-03T17:14:51.402Z",
+    "partners": {
+      "partner1": {
+        "id": "p1",
+        "name": "Lucas",
+        "avatar": "🥑",
+        "color": "#F472B6"
+      },
+      "partner2": {
+        "id": "p2",
+        "name": "Mi Pareja",
+        "avatar": "🌿",
+        "color": "#818CF8"
+      }
+    },
+    "accommodations": []
+  },
+  "AMOR-1927": {
+    "id": "AMOR-1927",
+    "name": "Nuestra Escapada Romántica 💕",
+    "nights": 3,
+    "currency": "USD",
+    "pin": "",
+    "createdAt": "2026-10-03T17:16:35.672Z",
+    "updatedAt": "2026-10-03T17:16:35.672Z",
+    "partners": {
+      "partner1": {
+        "id": "p1",
+        "name": "Lucas",
+        "avatar": "??",
+        "color": "#F472B6"
+      },
+      "partner2": {
+        "id": "p2",
+        "name": "Valen",
+        "avatar": "??",
+        "color": "#818CF8"
+      }
+    },
+    "accommodations": []
   }
 }

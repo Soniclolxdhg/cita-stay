@@ -10,20 +10,25 @@ import AiConciergeModal from './components/AiConciergeModal';
 import CoupleSettingsModal from './components/CoupleSettingsModal';
 import CommentsModal from './components/CommentsModal';
 import MobileBottomNav from './components/MobileBottomNav';
+import AuthScreen from './components/AuthScreen';
 import { Plus, Sparkles, Heart } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
 export default function App() {
   // Determine Space ID from URL param ?space=XYZ or localStorage
-  const [spaceId] = useState(() => {
+  const [spaceId, setSpaceId] = useState(() => {
     const params = new URLSearchParams(window.location.search);
     const fromUrl = params.get('space');
     if (fromUrl) {
-      localStorage.setItem('cita_space_id', fromUrl.toUpperCase().trim());
       return fromUrl.toUpperCase().trim();
     }
     const saved = localStorage.getItem('cita_space_id');
     return saved || 'AMOR-2026';
+  });
+
+  // Authentication state
+  const [isAuthenticated, setIsAuthenticated] = useState(() => {
+    return localStorage.getItem('cita_authenticated') === 'true';
   });
 
   // Partner identity for this device (p1 or p2)
@@ -70,6 +75,30 @@ export default function App() {
     setTimeout(() => setToastMessage(''), 3500);
   };
 
+  // Login handler
+  const handleLoginSuccess = (newSpaceId, partnerId, initialData) => {
+    setSpaceId(newSpaceId);
+    setCurrentPartnerId(partnerId || 'p1');
+    setIsAuthenticated(true);
+    localStorage.setItem('cita_authenticated', 'true');
+    localStorage.setItem('cita_space_id', newSpaceId);
+    localStorage.setItem('cita_partner_id', partnerId || 'p1');
+    if (initialData) {
+      setSpaceData(initialData);
+    }
+    const newUrl = window.location.pathname + '?space=' + newSpaceId;
+    window.history.pushState({ path: newUrl }, '', newUrl);
+  };
+
+  const handleLogout = () => {
+    setIsAuthenticated(false);
+    localStorage.removeItem('cita_authenticated');
+  };
+
+  const handleExploreDemo = () => {
+    handleLoginSuccess('AMOR-2026', 'p1');
+  };
+
   // Fetch space data from backend
   const loadSpaceData = useCallback(async (isInitial = false) => {
     try {
@@ -88,12 +117,13 @@ export default function App() {
 
   // Initial load + Real-time synchronization polling (every 4 seconds)
   useEffect(() => {
+    if (!isAuthenticated) return;
     loadSpaceData(true);
     const interval = setInterval(() => {
       loadSpaceData(false);
     }, 4000);
     return () => clearInterval(interval);
-  }, [loadSpaceData]);
+  }, [loadSpaceData, isAuthenticated]);
 
   // Handle partner switcher
   const handleSwitchPartner = () => {
@@ -319,6 +349,20 @@ export default function App() {
     return items;
   }, [spaceData.accommodations, activeFilter, sortBy]);
 
+  // If not logged in / no active space session, show welcoming couple Auth Screen
+  if (!isAuthenticated) {
+    return (
+      <>
+        <AmbientHearts />
+        <AuthScreen
+          initialSpaceId={spaceId}
+          onLoginSuccess={handleLoginSuccess}
+          onExploreDemo={handleExploreDemo}
+        />
+      </>
+    );
+  }
+
   return (
     <>
       <AmbientHearts />
@@ -335,6 +379,7 @@ export default function App() {
           onOpenSettingsModal={() => setIsSettingsModalOpen(true)}
           accommodationsCount={spaceData.accommodations.length}
           matchesCount={matchesCount}
+          onLogout={handleLogout}
         />
 
         {/* Trip Banner & Configuration */}

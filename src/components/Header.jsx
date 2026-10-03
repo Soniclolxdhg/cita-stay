@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Heart, Sparkles, Plus, Users, Share2, Copy, Check, Settings } from 'lucide-react';
+import { Heart, Sparkles, Plus, Users, Share2, Copy, Check, Settings, LogOut } from 'lucide-react';
 
 export default function Header({
   spaceId,
@@ -10,7 +10,8 @@ export default function Header({
   onOpenAiModal,
   onOpenSettingsModal,
   accommodationsCount,
-  matchesCount
+  matchesCount,
+  onLogout
 }) {
   const [copied, setCopied] = useState(false);
   const currentPartner = partners[currentPartnerId === 'p2' ? 'partner2' : 'partner1'] || {
@@ -98,6 +99,18 @@ export default function Header({
         >
           <Settings size={16} />
         </button>
+
+        {/* Change Space / Logout button */}
+        {onLogout && (
+          <button
+            className="btn btn-secondary btn-icon btn-sm"
+            onClick={onLogout}
+            title="Cambiar de nido / Cerrar sesión"
+            style={{ color: 'var(--text-muted)' }}
+          >
+            <LogOut size={15} />
+          </button>
+        )}
       </div>
     </header>
   );

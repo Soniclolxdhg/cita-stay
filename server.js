@@ -204,6 +204,65 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// Auth: Create a custom couple space
+app.post('/api/auth/create-space', (req, res) => {
+  const {
+    name = 'Nuestra Escapada Romántica 💕',
+    p1Name = 'Pareja 1',
+    p1Avatar = '🌸',
+    p2Name = 'Pareja 2',
+    p2Avatar = '🐻',
+    pin = '',
+    withExamples = false,
+    nights = 3,
+    currency = 'USD'
+  } = req.body;
+
+  const randomDigits = Math.floor(1000 + Math.random() * 9000);
+  const cleanId = `AMOR-${randomDigits}`;
+
+  const newSpace = {
+    id: cleanId,
+    name: name.trim() || 'Nuestra Escapada Romántica 💕',
+    nights: Math.max(1, parseInt(nights, 10) || 3),
+    currency: currency || 'USD',
+    pin: pin ? String(pin).trim() : '',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    partners: {
+      partner1: { id: 'p1', name: (p1Name || 'Ella').trim(), avatar: p1Avatar || '🌸', color: '#F472B6' },
+      partner2: { id: 'p2', name: (p2Name || 'Él').trim(), avatar: p2Avatar || '🐻', color: '#818CF8' }
+    },
+    accommodations: withExamples ? createDefaultSpace(cleanId).accommodations : []
+  };
+
+  spacesCache[cleanId] = newSpace;
+  saveSpaces();
+
+  res.status(201).json({ success: true, space: newSpace });
+});
+
+// Auth: Join an existing couple space
+app.post('/api/auth/join-space', (req, res) => {
+  const { spaceId, pin = '', partnerChoice = '' } = req.body;
+  const cleanId = (spaceId || '').toUpperCase().trim();
+
+  if (!cleanId || !spacesCache[cleanId]) {
+    return res.status(404).json({ error: `No encontramos ningún nido con el código "${cleanId}". Revisa si lo escribiste bien.` });
+  }
+
+  const space = spacesCache[cleanId];
+
+  // Check pin if required
+  if (space.pin && space.pin !== String(pin).trim()) {
+    return res.status(401).json({ error: 'El PIN de pareja es incorrecto.' });
+  }
+
+  const partnerId = partnerChoice === 'p2' ? 'p2' : 'p1';
+
+  res.json({ success: true, space, partnerId });
+});
+
 // Get space data
 app.get('/api/space/:spaceId', (req, res) => {
   const { spaceId } = req.params;
