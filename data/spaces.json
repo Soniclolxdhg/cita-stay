@@ -1,0 +1,178 @@
+{
+  "AMOR-2026": {
+    "id": "AMOR-2026",
+    "name": "Nuestra Escapada Romántica 💕",
+    "nights": 3,
+    "currency": "USD",
+    "createdAt": "2026-10-03T15:37:39.873Z",
+    "updatedAt": "2026-10-03T15:43:12.293Z",
+    "partners": {
+      "partner1": {
+        "id": "p1",
+        "name": "Cami",
+        "avatar": "🌸",
+        "color": "#F472B6"
+      },
+      "partner2": {
+        "id": "p2",
+        "name": "Nico",
+        "avatar": "🐻",
+        "color": "#818CF8"
+      }
+    },
+    "accommodations": [
+      {
+        "id": "acc_demo_1",
+        "title": "Cabaña Bosque & Tina Nórdica Caliente",
+        "type": "Cabaña",
+        "location": "Bariloche, Circuito Chico",
+        "pricePerNight": 135,
+        "currency": "USD",
+        "imageUrl": "https://images.unsplash.com/photo-1587061949409-02df41d5e562?auto=format&fit=crop&w=1200&q=80",
+        "link": "https://www.airbnb.com",
+        "description": "Hermosa cabaña de troncos y piedra inmersa en el bosque andino. Cuenta con tina de madera caliente al aire libre bajo las estrellas y chimenea a leña.",
+        "highlights": [
+          "Tina nórdica de agua caliente privada",
+          "Chimenea a leña con provisión ilimitada",
+          "Desayuno casero con mermeladas regionales",
+          "Vistas panorámicas a la cordillera"
+        ],
+        "cons": [
+          "Requiere vehículo para llegar",
+          "Señal de celular media (Wi-Fi fibra óptica disponible)"
+        ],
+        "addedBy": "p1",
+        "createdAt": "2026-10-02T15:37:39.873Z",
+        "reactions": {
+          "p1": {
+            "liked": true,
+            "reaction": "love",
+            "note": "¡Me enamoré de la tina bajo las estrellas!"
+          },
+          "p2": {
+            "liked": true,
+            "reaction": "love",
+            "note": "¡Ufff, tremendo! Es nuestro lugar 100%"
+          }
+        },
+        "tags": [
+          "😍 Me fascina",
+          "🛁 Tiene jacuzzi/tina",
+          "✨ Súper romántico",
+          "🌲 Naturaleza total"
+        ],
+        "comments": [
+          {
+            "id": "c_demo_1",
+            "partnerId": "p1",
+            "partnerName": "Cami",
+            "avatar": "🌸",
+            "text": "Amor, imaginate acá tomando un vino al lado del fuego 🍷🔥",
+            "createdAt": "2026-10-03T03:37:39.873Z"
+          },
+          {
+            "id": "c_demo_2",
+            "partnerId": "p2",
+            "partnerName": "Nico",
+            "avatar": "🐻",
+            "text": "¡Completamente sí! Ya vi que tiene parrilla también haha 🥩",
+            "createdAt": "2026-10-03T05:37:39.873Z"
+          }
+        ]
+      },
+      {
+        "id": "acc_demo_2",
+        "title": "Loft Boutique con Vista al Lago & Spa",
+        "type": "Hotel Boutique",
+        "location": "San Martín de los Andes, Centro",
+        "pricePerNight": 180,
+        "currency": "USD",
+        "imageUrl": "https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&w=1200&q=80",
+        "link": "https://www.booking.com",
+        "description": "Loft de diseño minimalista con ventanal de piso a techo sobre la bahía. Acceso libre al circuito de sauna húmedo, piscina climatizada in/out y cava de vinos.",
+        "highlights": [
+          "Piscina climatizada in-out y sauna",
+          "A solo 3 cuadras del centro gastronómico",
+          "Desayuno buffet gourmet incluido",
+          "Cama king size con sábanas de algodón egipcio"
+        ],
+        "cons": [
+          "Precio más elevado por noche",
+          "Estacionamiento medido en la zona"
+        ],
+        "addedBy": "p2",
+        "createdAt": "2026-10-02T21:37:39.873Z",
+        "reactions": {
+          "p1": {
+            "liked": true,
+            "reaction": "love",
+            "note": "¡Divino el spa y estar cerca de los restaurantes!"
+          },
+          "p2": {
+            "liked": false,
+            "reaction": "expensive",
+            "note": "Es precioso pero se nos va un toque de presupuesto"
+          }
+        },
+        "tags": [
+          "✨ Muy romántico",
+          "💸 Un poco caro",
+          "🍷 Cerca de restaurantes",
+          "💆‍♀️ Tiene Spa"
+        ],
+        "comments": [
+          {
+            "id": "c_demo_3",
+            "partnerId": "p1",
+            "partnerName": "Cami",
+            "avatar": "🌸",
+            "text": "La pileta climatizada con vista al lago es una locura 😍",
+            "createdAt": "2026-10-03T07:37:39.873Z"
+          }
+        ]
+      },
+      {
+        "id": "acc_demo_3",
+        "title": "Glamping Domo Geodésico Deluxe & Estrellas",
+        "type": "Glamping",
+        "location": "Villa La Angostura, Puerto Manzano",
+        "pricePerNight": 95,
+        "currency": "USD",
+        "imageUrl": "https://images.unsplash.com/photo-1510798831971-661eb04b3739?auto=format&fit=crop&w=1200&q=80",
+        "link": "https://www.airbnb.com",
+        "description": "Experiencia inmersiva en domo geodésico transparente con calefacción a pellets, deck privado con fogonero y telescopio para contemplar la Vía Láctea.",
+        "highlights": [
+          "Excelente relación calidad-precio ($95/noche)",
+          "Techo panorámico para ver estrellas desde la cama",
+          "Fogonero privado exterior para malvaviscos",
+          "Entorno ultra silencioso y pacífico"
+        ],
+        "cons": [
+          "Baño privado en módulo contiguo a 5 metros",
+          "Capacidad limitada de equipaje"
+        ],
+        "addedBy": "p1",
+        "createdAt": "2026-10-03T09:37:39.873Z",
+        "reactions": {
+          "p1": {
+            "liked": true,
+            "reaction": "love",
+            "note": "¡Re económico y original!"
+          },
+          "p2": {
+            "liked": true,
+            "reaction": "love",
+            "note": "¡Me copa la onda de fogata a la noche!"
+          }
+        },
+        "tags": [
+          "😍 Me fascina",
+          "💰 Gran precio",
+          "⭐ Ver estrellas",
+          "🔥 Fogón privado"
+        ],
+        "comments": []
+      }
+    ]
+  }
+}

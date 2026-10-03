@@ -1,0 +1,214 @@
+import React, { useState } from 'react';
+import { X, Users, Copy, Check, Share2, Sparkles, Key, Smartphone } from 'lucide-react';
+
+const AVATARS_P1 = ['🌸', '🦊', '🐱', '🐰', '🥑', '🌺', '✨', '🍓'];
+const AVATARS_P2 = ['🐻', '🦁', '🐨', '🐼', '🌿', '🌊', '🚀', '☕'];
+
+export default function CoupleSettingsModal({
+  isOpen,
+  onClose,
+  spaceId,
+  tripName,
+  partners,
+  onUpdateTrip,
+  apiKey,
+  onUpdateApiKey
+}) {
+  const [localTripName, setLocalTripName] = useState(tripName || '');
+  const [p1Name, setP1Name] = useState(partners.partner1?.name || 'Cami');
+  const [p1Avatar, setP1Avatar] = useState(partners.partner1?.avatar || '🌸');
+  const [p2Name, setP2Name] = useState(partners.partner2?.name || 'Nico');
+  const [p2Avatar, setP2Avatar] = useState(partners.partner2?.avatar || '🐻');
+  const [localKey, setLocalKey] = useState(apiKey || '');
+  const [copied, setCopied] = useState(false);
+
+  if (!isOpen) return null;
+
+  const shareUrl = window.location.origin + window.location.pathname + '?space=' + spaceId;
+
+  const handleCopyLink = () => {
+    navigator.clipboard.writeText(shareUrl);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2500);
+  };
+
+  const handleSave = (e) => {
+    e.preventDefault();
+    onUpdateTrip({
+      name: localTripName,
+      partners: {
+        partner1: { id: 'p1', name: p1Name.trim(), avatar: p1Avatar, color: '#F472B6' },
+        partner2: { id: 'p2', name: p2Name.trim(), avatar: p2Avatar, color: '#818CF8' }
+      }
+    });
+
+    if (onUpdateApiKey) {
+      onUpdateApiKey(localKey.trim());
+    }
+
+    onClose();
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h3>
+            <span>⚙️</span>
+            <span>Espacio de Pareja & Conexión</span>
+          </h3>
+          <button className="close-btn" onClick={onClose}>
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Share Link Banner */}
+        <div style={{ background: 'var(--rose-50)', border: '1px solid var(--rose-200)', borderRadius: 'var(--radius-lg)', padding: '1.25rem', marginBottom: '1.5rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+            <span style={{ fontWeight: 700, fontSize: '0.88rem', color: 'var(--rose-600)', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+              <Share2 size={16} /> Enlace para tu Pareja
+            </span>
+            <span style={{ fontSize: '0.78rem', background: 'white', padding: '0.2rem 0.5rem', borderRadius: 'var(--radius-pill)', border: '1px solid var(--rose-200)', fontWeight: 600 }}>
+              Código: {spaceId}
+            </span>
+          </div>
+
+          <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
+            Copia y envíale este enlace por WhatsApp. Al abrirlo, ambos estarán sincronizados en tiempo real y verán los mismos alojamientos:
+          </p>
+
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <input
+              type="text"
+              readOnly
+              value={shareUrl}
+              className="form-input"
+              style={{ fontSize: '0.8rem', background: 'white' }}
+            />
+            <button className="btn btn-primary btn-sm" onClick={handleCopyLink}>
+              {copied ? <Check size={14} /> : <Copy size={14} />}
+              <span>{copied ? '¡Copiado!' : 'Copiar'}</span>
+            </button>
+          </div>
+        </div>
+
+        <form onSubmit={handleSave}>
+          <div className="form-group">
+            <label className="form-label">Nombre del Viaje / Escapada</label>
+            <input
+              type="text"
+              value={localTripName}
+              onChange={(e) => setLocalTripName(e.target.value)}
+              placeholder="Ej: Nuestra Escapada Romántica 💕"
+              className="form-input"
+            />
+          </div>
+
+          {/* Partner 1 config */}
+          <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border-soft)', borderRadius: 'var(--radius-md)', padding: '1rem', marginBottom: '1rem' }}>
+            <label className="form-label" style={{ color: 'var(--rose-600)' }}>
+              Pareja 1 (🌸)
+            </label>
+            <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', marginBottom: '0.5rem' }}>
+              <input
+                type="text"
+                value={p1Name}
+                onChange={(e) => setP1Name(e.target.value)}
+                placeholder="Nombre de ella o él"
+                className="form-input"
+                style={{ flex: 1 }}
+              />
+              <span style={{ fontSize: '1.5rem', padding: '0 0.5rem' }}>{p1Avatar}</span>
+            </div>
+            <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+              {AVATARS_P1.map((av) => (
+                <button
+                  key={av}
+                  type="button"
+                  onClick={() => setP1Avatar(av)}
+                  style={{
+                    background: p1Avatar === av ? 'var(--rose-200)' : 'white',
+                    border: '1px solid var(--rose-200)',
+                    borderRadius: '50%',
+                    width: '32px',
+                    height: '32px',
+                    fontSize: '1.1rem',
+                    cursor: 'pointer'
+                  }}
+                >
+                  {av}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Partner 2 config */}
+          <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border-soft)', borderRadius: 'var(--radius-md)', padding: '1rem', marginBottom: '1.25rem' }}>
+            <label className="form-label" style={{ color: 'var(--lavender-500)' }}>
+              Pareja 2 (🐻)
+            </label>
+            <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', marginBottom: '0.5rem' }}>
+              <input
+                type="text"
+                value={p2Name}
+                onChange={(e) => setP2Name(e.target.value)}
+                placeholder="Nombre de tu pareja"
+                className="form-input"
+                style={{ flex: 1 }}
+              />
+              <span style={{ fontSize: '1.5rem', padding: '0 0.5rem' }}>{p2Avatar}</span>
+            </div>
+            <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+              {AVATARS_P2.map((av) => (
+                <button
+                  key={av}
+                  type="button"
+                  onClick={() => setP2Avatar(av)}
+                  style={{
+                    background: p2Avatar === av ? 'var(--lavender-200)' : 'white',
+                    border: '1px solid var(--lavender-200)',
+                    borderRadius: '50%',
+                    width: '32px',
+                    height: '32px',
+                    fontSize: '1.1rem',
+                    cursor: 'pointer'
+                  }}
+                >
+                  {av}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Optional Gemini API Key */}
+          <div className="form-group" style={{ borderTop: '1px dashed var(--border-soft)', paddingTop: '1rem' }}>
+            <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+              <Key size={14} color="#A855F7" />
+              <span>Gemini API Key (Opcional)</span>
+            </label>
+            <input
+              type="password"
+              placeholder="AIzaSy... (Opcional - la app ya incluye IA integrada)"
+              value={localKey}
+              onChange={(e) => setLocalKey(e.target.value)}
+              className="form-input"
+              style={{ fontSize: '0.82rem' }}
+            />
+            <small style={{ color: 'var(--text-muted)', fontSize: '0.75rem', display: 'block', marginTop: '0.3rem' }}>
+              Si tienes tu propia clave de Google AI Studio puedes pegarla aquí para análisis aún más profundos.
+            </small>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1.5rem' }}>
+            <button type="button" className="btn btn-secondary" onClick={onClose}>
+              Cerrar
+            </button>
+            <button type="submit" className="btn btn-primary">
+              Guardar Cambios 💕
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
