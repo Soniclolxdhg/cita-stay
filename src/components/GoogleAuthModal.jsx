@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Check, ArrowRight } from 'lucide-react';
 
 export default function GoogleAuthModal({
@@ -6,13 +7,18 @@ export default function GoogleAuthModal({
   onClose,
   onGoogleSuccess
 }) {
+  const [mounted, setMounted] = useState(false);
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
   const [partnerName, setPartnerName] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  if (!isOpen) return null;
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!isOpen || !mounted) return null;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -81,9 +87,9 @@ export default function GoogleAuthModal({
     }
   };
 
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" style={{ maxWidth: '440px', padding: '2rem 1.75rem' }} onClick={(e) => e.stopPropagation()}>
+  return createPortal(
+    <div className="modal-overlay" onClick={onClose} style={{ zIndex: 99999 }}>
+      <div className="modal-content" style={{ maxWidth: '440px', padding: '2rem 1.75rem', margin: 'auto' }} onClick={(e) => e.stopPropagation()}>
         <div className="modal-header" style={{ marginBottom: '1rem' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
             {/* Official Google G Logo */}
@@ -163,6 +169,7 @@ export default function GoogleAuthModal({
           </button>
         </form>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

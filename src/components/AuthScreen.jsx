@@ -119,10 +119,11 @@ export default function AuthScreen({
   };
 
   return (
-    <div className="auth-overlay">
-      <div className="auth-card">
-        {/* Logo and title */}
-        <div className="auth-brand">
+    <>
+      <div className="auth-overlay">
+        <div className="auth-card">
+          {/* Logo and title */}
+          <div className="auth-brand">
           <div className="auth-icon-badge">💕</div>
           <h1 className="font-serif">Cita <span>Stay</span></h1>
           <p className="auth-subtitle">
@@ -361,16 +362,17 @@ export default function AuthScreen({
             <span>O probar versión de demostración rápida</span>
           </button>
         </div>
-
-        {/* Google Auth Modal */}
-        <GoogleAuthModal
-          isOpen={isGoogleModalOpen}
-          onClose={() => setIsGoogleModalOpen(false)}
-          onGoogleSuccess={(data) => {
-            onLoginSuccess(data.space.id, 'p1', data.space);
-          }}
-        />
       </div>
     </div>
-  );
+
+    {/* Google Auth Modal rendered outside card for perfect centering */}
+    <GoogleAuthModal
+      isOpen={isGoogleModalOpen}
+      onClose={() => setIsGoogleModalOpen(false)}
+      onGoogleSuccess={(data) => {
+        onLoginSuccess(data.space.id, 'p1', data.space);
+      }}
+    />
+  </>
+);
 }
