@@ -5,7 +5,7 @@
     "nights": 3,
     "currency": "USD",
     "createdAt": "2026-10-03T15:37:39.873Z",
-    "updatedAt": "2026-10-03T15:43:12.293Z",
+    "updatedAt": "2026-10-03T16:36:38.892Z",
     "partners": {
       "partner1": {
         "id": "p1",
@@ -45,7 +45,7 @@
         "createdAt": "2026-10-02T15:37:39.873Z",
         "reactions": {
           "p1": {
-            "liked": true,
+            "liked": false,
             "reaction": "love",
             "note": "¡Me enamoré de la tina bajo las estrellas!"
           },
@@ -155,7 +155,7 @@
         "createdAt": "2026-10-03T09:37:39.873Z",
         "reactions": {
           "p1": {
-            "liked": true,
+            "liked": false,
             "reaction": "love",
             "note": "¡Re económico y original!"
           },

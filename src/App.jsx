@@ -9,6 +9,7 @@ import AddAccommodationModal from './components/AddAccommodationModal';
 import AiConciergeModal from './components/AiConciergeModal';
 import CoupleSettingsModal from './components/CoupleSettingsModal';
 import CommentsModal from './components/CommentsModal';
+import MobileBottomNav from './components/MobileBottomNav';
 import { Plus, Sparkles, Heart } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
@@ -408,6 +409,16 @@ export default function App() {
           />
         )}
       </div>
+
+      {/* Mobile Bottom Dock for iPhone & Touch Devices */}
+      <MobileBottomNav
+        currentPartner={spaceData.partners[currentPartnerId === 'p2' ? 'partner2' : 'partner1'] || { name: 'Pareja', avatar: '🌸' }}
+        onSwitchPartner={handleSwitchPartner}
+        onOpenAddModal={() => setIsAddModalOpen(true)}
+        onOpenAiModal={() => setIsAiModalOpen(true)}
+        onOpenSettingsModal={() => setIsSettingsModalOpen(true)}
+        matchesCount={matchesCount}
+      />
 
       {/* Add Accommodation Modal */}
       <AddAccommodationModal
