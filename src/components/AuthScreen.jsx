@@ -13,96 +13,6 @@ export default function AuthScreen({
   const [mode, setMode] = useState(initialSpaceId && initialSpaceId !== 'AMOR-2026' ? 'join' : 'create');
   const [isGoogleModalOpen, setIsGoogleModalOpen] = useState(false);
 
-  // Initialize Google One Tap if Client ID is configured
-  useEffect(() => {
-    const savedClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || localStorage.getItem('cita_google_client_id');
-    if (!savedClientId || !window.google?.accounts?.id) return;
-
-    try {
-      window.google.accounts.id.initialize({
-        client_id: savedClientId,
-        callback: async (response) => {
-          if (response.credential) {
-            try {
-              const base64Url = response.credential.split('.')[1];
-              const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-              const payload = JSON.parse(atob(base64));
-              const res = await fetch('/api/auth/google', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  email: payload.email,
-                  name: payload.name,
-                  picture: payload.picture,
-                  sub: payload.sub
-                })
-              });
-              const data = await res.json();
-              if (data.success && data.space) {
-                onLoginSuccess(data.space.id, 'p1', data.space);
-              }
-            } catch (e) {
-              console.error('Error decoding credential:', e);
-            }
-          }
-        }
-      });
-      window.google.accounts.id.prompt();
-    } catch (e) {
-      console.warn('Google One Tap notice:', e);
-    }
-  }, [onLoginSuccess]);
-
-  const handleGoogleClick = () => {
-    const savedClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || localStorage.getItem('cita_google_client_id');
-    if (!savedClientId || !window.google?.accounts?.oauth2) {
-      setIsGoogleModalOpen(true);
-      return;
-    }
-
-    try {
-      const client = window.google.accounts.oauth2.initTokenClient({
-        client_id: savedClientId,
-        scope: 'email profile openid',
-        callback: async (tokenResponse) => {
-          if (tokenResponse.error) {
-            setIsGoogleModalOpen(true);
-            return;
-          }
-          try {
-            const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-              headers: { Authorization: `Bearer ${tokenResponse.access_token}` }
-            });
-            const profile = await res.json();
-            if (profile.email) {
-              const authRes = await fetch('/api/auth/google', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  email: profile.email,
-                  name: profile.name || profile.given_name || profile.email.split('@')[0],
-                  picture: profile.picture,
-                  sub: profile.sub
-                })
-              });
-              const data = await authRes.json();
-              if (data.success && data.space) {
-                onLoginSuccess(data.space.id, 'p1', data.space);
-              }
-            }
-          } catch (err) {
-            console.error('Error fetching Google user profile:', err);
-            setIsGoogleModalOpen(true);
-          }
-        }
-      });
-      client.requestAccessToken({ prompt: 'select_account' });
-    } catch (err) {
-      console.warn('Error launching Google popup directly:', err);
-      setIsGoogleModalOpen(true);
-    }
-  };
-
   // Create form state
   const [p1Name, setP1Name] = useState('');
   const [p1Avatar, setP1Avatar] = useState('🌸');
@@ -224,7 +134,7 @@ export default function AuthScreen({
         <button
           type="button"
           className="btn-google-sign-in"
-          onClick={handleGoogleClick}
+          onClick={() => setIsGoogleModalOpen(true)}
           title="Iniciar sesión y guardar con tu cuenta de Google"
         >
           <svg width="20" height="20" viewBox="0 0 24 24" style={{ flexShrink: 0 }}>
