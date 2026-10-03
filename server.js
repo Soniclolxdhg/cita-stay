@@ -17,13 +17,20 @@ const PORT = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
-// Ensure data directory exists
-const DATA_DIR = path.join(__dirname, 'data');
-if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-}
-
+// Storage configuration (supports both local disk and Vercel/serverless environments)
+const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+const LOCAL_DATA_DIR = path.join(__dirname, 'data');
+const DATA_DIR = isServerless ? path.join('/tmp', 'cita-data') : LOCAL_DATA_DIR;
 const DB_FILE = path.join(DATA_DIR, 'spaces.json');
+const SEED_FILE = path.join(LOCAL_DATA_DIR, 'spaces.json');
+
+try {
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  }
+} catch (e) {
+  console.warn('Notice on DATA_DIR creation:', e.message);
+}
 
 // Curated high-res romantic lodging photo fallbacks
 const ROMANTIC_PHOTOS = [
@@ -49,18 +56,24 @@ function loadSpaces() {
     if (fs.existsSync(DB_FILE)) {
       const data = fs.readFileSync(DB_FILE, 'utf-8');
       spacesCache = JSON.parse(data);
+    } else if (fs.existsSync(SEED_FILE)) {
+      const data = fs.readFileSync(SEED_FILE, 'utf-8');
+      spacesCache = JSON.parse(data);
     }
   } catch (err) {
-    console.error('Error loading spaces from disk:', err);
-    spacesCache = {};
+    console.error('Error loading spaces from disk:', err.message);
+    if (!spacesCache) spacesCache = {};
   }
 }
 
 function saveSpaces() {
   try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
     fs.writeFileSync(DB_FILE, JSON.stringify(spacesCache, null, 2), 'utf-8');
   } catch (err) {
-    console.error('Error saving spaces to disk:', err);
+    console.error('Error saving spaces to disk:', err.message);
   }
 }
 
@@ -247,7 +260,15 @@ app.post('/api/auth/join-space', (req, res) => {
   const { spaceId, pin = '', partnerChoice = '' } = req.body;
   const cleanId = (spaceId || '').toUpperCase().trim();
 
-  if (!cleanId || !spacesCache[cleanId]) {
+  if (!cleanId) {
+    return res.status(400).json({ error: 'Ingresa un código de nido válido.' });
+  }
+
+  if (!spacesCache[cleanId]) {
+    loadSpaces();
+  }
+
+  if (!spacesCache[cleanId]) {
     return res.status(404).json({ error: `No encontramos ningún nido con el código "${cleanId}". Revisa si lo escribiste bien.` });
   }
 
@@ -356,6 +377,10 @@ app.post('/api/space/:spaceId/link-google', (req, res) => {
 app.get('/api/space/:spaceId', (req, res) => {
   const { spaceId } = req.params;
   const cleanId = (spaceId || 'default').toUpperCase().trim();
+
+  if (!spacesCache[cleanId]) {
+    loadSpaces();
+  }
 
   if (!spacesCache[cleanId]) {
     // Only load demo items for the official demo space AMOR-2026 or DEMO
@@ -839,7 +864,7 @@ Extrae y devuelve ÚNICAMENTE un objeto JSON válido (sin backticks de markdown 
 });
 
 // AI Romantic Concierge / Summary & Recommendation
-app.post('/api/ai/recommend', async (req, res) => {
+app.post(['/api/ai/recommend', '/api/ai/concierge'], async (req, res) => {
   try {
     const { accommodations, nights = 3, currency = 'USD', partners = {}, apiKey } = req.body;
 

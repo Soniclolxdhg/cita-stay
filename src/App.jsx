@@ -54,20 +54,26 @@ export default function App() {
     return localStorage.getItem('cita_gemini_key') || '';
   });
 
-  // Space data state
-  const [spaceData, setSpaceData] = useState({
-    id: spaceId,
-    name: 'Nuestra Escapada Romántica 💕',
-    nights: 3,
-    currency: 'USD',
-    partners: {
-      partner1: { id: 'p1', name: 'Cami', avatar: '🌸', color: '#F472B6' },
-      partner2: { id: 'p2', name: 'Nico', avatar: '🐻', color: '#818CF8' }
-    },
-    accommodations: []
+  // Space data state with instant offline cache hydration
+  const [spaceData, setSpaceData] = useState(() => {
+    try {
+      const cached = localStorage.getItem(`cita_cache_${spaceId}`);
+      if (cached) return JSON.parse(cached);
+    } catch (_) {}
+    return {
+      id: spaceId,
+      name: 'Nuestra Escapada Romántica 💕',
+      nights: 3,
+      currency: 'USD',
+      partners: {
+        partner1: { id: 'p1', name: 'Pareja 1', avatar: '🌸', color: '#F472B6' },
+        partner2: { id: 'p2', name: 'Pareja 2', avatar: '🐻', color: '#818CF8' }
+      },
+      accommodations: []
+    };
   });
 
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
 
   // Filters & Views
   const [activeFilter, setActiveFilter] = useState('all');
@@ -99,6 +105,12 @@ export default function App() {
     localStorage.setItem('cita_partner_id', partnerId || 'p1');
     if (initialData) {
       setSpaceData(initialData);
+      try {
+        localStorage.setItem(`cita_cache_${newSpaceId}`, JSON.stringify(initialData));
+      } catch (_) {}
+      if (initialData.googleOwner) {
+        localStorage.setItem('cita_google_user', JSON.stringify(initialData.googleOwner));
+      }
     }
     const newUrl = window.location.pathname + '?space=' + newSpaceId;
     window.history.pushState({ path: newUrl }, '', newUrl);
@@ -118,21 +130,30 @@ export default function App() {
     handleLoginSuccess('AMOR-2026', 'p1');
   };
 
-  // Fetch space data from backend
+  // Fetch space data from backend with instant cache fallback
   const loadSpaceData = useCallback(async (isInitial = false) => {
     try {
-      if (isInitial) setLoading(true);
+      if (isInitial && spaceData.accommodations.length === 0) setLoading(true);
       const res = await fetch(`/api/space/${spaceId}`);
       if (res.ok) {
         const data = await res.json();
         setSpaceData(data);
+        try {
+          localStorage.setItem(`cita_cache_${spaceId}`, JSON.stringify(data));
+        } catch (_) {}
       }
     } catch (err) {
       console.warn('Could not sync with backend, using cached state:', err);
+      try {
+        const cached = localStorage.getItem(`cita_cache_${spaceId}`);
+        if (cached) {
+          setSpaceData(JSON.parse(cached));
+        }
+      } catch (_) {}
     } finally {
       if (isInitial) setLoading(false);
     }
-  }, [spaceId]);
+  }, [spaceId, spaceData.accommodations.length]);
 
   // Initial load + Real-time synchronization polling (every 4 seconds)
   useEffect(() => {

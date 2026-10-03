@@ -38,9 +38,6 @@ export default function AccommodationCard({
   );
 
   const handleHeartClick = (partnerId) => {
-    // Only current user can toggle their own heart
-    if (partnerId !== currentPartnerId) return;
-
     const currentLiked = partnerId === 'p2' ? p2Reaction.liked : p1Reaction.liked;
     const nextLiked = !currentLiked;
 
@@ -182,9 +179,7 @@ export default function AccommodationCard({
                 <button
                   className={`heart-toggle-btn ${p1Reaction.liked ? 'liked' : ''}`}
                   onClick={() => handleHeartClick('p1')}
-                  disabled={currentPartnerId !== 'p1'}
-                  title={currentPartnerId === 'p1' ? 'Tocar para votar/desvotar' : `Solo ${p1.name} puede cambiar su voto`}
-                  style={{ opacity: currentPartnerId === 'p1' ? 1 : 0.8 }}
+                  title={`Voto de ${p1.name}. Toca para cambiar.`}
                 >
                   {p1Reaction.liked ? '❤️' : '🤍'}
                 </button>
@@ -209,9 +204,7 @@ export default function AccommodationCard({
                 <button
                   className={`heart-toggle-btn ${p2Reaction.liked ? 'liked' : ''}`}
                   onClick={() => handleHeartClick('p2')}
-                  disabled={currentPartnerId !== 'p2'}
-                  title={currentPartnerId === 'p2' ? 'Tocar para votar/desvotar' : `Solo ${p2.name} puede cambiar su voto`}
-                  style={{ opacity: currentPartnerId === 'p2' ? 1 : 0.8 }}
+                  title={`Voto de ${p2.name}. Toca para cambiar.`}
                 >
                   {p2Reaction.liked ? '❤️' : '🤍'}
                 </button>

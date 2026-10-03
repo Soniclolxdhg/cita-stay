@@ -230,7 +230,7 @@
     "currency": "USD",
     "pin": "",
     "createdAt": "2026-10-03T17:53:47.090Z",
-    "updatedAt": "2026-10-03T17:53:47.090Z",
+    "updatedAt": "2026-10-03T18:09:01.675Z",
     "googleOwner": {
       "email": "lucas.test@gmail.com",
       "name": "lucas.test",
@@ -251,6 +251,89 @@
         "color": "#818CF8"
       }
     },
-    "accommodations": []
+    "accommodations": [
+      {
+        "id": "acc_1791050941663_av6h",
+        "title": "Cabaña del Bosque y Niebla",
+        "type": "Cabaña",
+        "location": "Bariloche, Circuito Chico",
+        "pricePerNight": 125,
+        "currency": "USD",
+        "imageUrl": "https://images.unsplash.com/photo-1510798831971-661eb04b3739?auto=format&fit=crop&w=1200&q=80",
+        "link": "",
+        "description": "Cabaña íntima con tina caliente al aire libre",
+        "highlights": [
+          "Tina caliente privada",
+          "Vista al lago"
+        ],
+        "cons": [],
+        "tags": [],
+        "addedBy": "p1",
+        "createdAt": "2026-10-03T18:09:01.663Z",
+        "reactions": {
+          "p1": {
+            "liked": true,
+            "reaction": null,
+            "note": ""
+          },
+          "p2": {
+            "liked": true,
+            "reaction": null,
+            "note": ""
+          }
+        },
+        "comments": [
+          {
+            "id": "c_1791050941675_aqr",
+            "partnerId": "p1",
+            "partnerName": "lucas.test",
+            "avatar": "🌸",
+            "text": "¡Amor, reservemos este lugar ya mismo!",
+            "createdAt": "2026-10-03T18:09:01.675Z"
+          }
+        ]
+      },
+      {
+        "id": "acc_1791050909037_cztk",
+        "title": "Cabaña del Bosque y Niebla",
+        "type": "Cabaña",
+        "location": "Bariloche, Circuito Chico",
+        "pricePerNight": 125,
+        "currency": "USD",
+        "imageUrl": "https://images.unsplash.com/photo-1578683010236-d716f9a3f461?auto=format&fit=crop&w=1200&q=80",
+        "link": "",
+        "description": "Cabaña íntima con tina caliente al aire libre",
+        "highlights": [
+          "Tina caliente privada",
+          "Vista al lago"
+        ],
+        "cons": [],
+        "tags": [],
+        "addedBy": "p1",
+        "createdAt": "2026-10-03T18:08:29.037Z",
+        "reactions": {
+          "p1": {
+            "liked": true,
+            "reaction": null,
+            "note": ""
+          },
+          "p2": {
+            "liked": true,
+            "reaction": null,
+            "note": ""
+          }
+        },
+        "comments": [
+          {
+            "id": "c_1791050909052_1gc",
+            "partnerId": "p1",
+            "partnerName": "lucas.test",
+            "avatar": "🌸",
+            "text": "¡Amor, reservemos este lugar ya mismo!",
+            "createdAt": "2026-10-03T18:08:29.052Z"
+          }
+        ]
+      }
+    ]
   }
 }

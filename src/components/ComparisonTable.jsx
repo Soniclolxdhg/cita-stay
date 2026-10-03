@@ -102,13 +102,9 @@ export default function ComparisonTable({
                 <td style={{ textAlign: 'center' }}>
                   <button
                     className={`heart-toggle-btn ${p1Liked ? 'liked' : ''}`}
-                    onClick={() => {
-                      if (currentPartnerId === 'p1') {
-                        onToggleReaction(item.id, { partnerId: 'p1', liked: !p1Liked });
-                      }
-                    }}
-                    style={{ margin: '0 auto', cursor: currentPartnerId === 'p1' ? 'pointer' : 'default' }}
-                    title={currentPartnerId === 'p1' ? 'Clic para cambiar voto' : `Voto de ${p1.name}`}
+                    onClick={() => onToggleReaction(item.id, { partnerId: 'p1', liked: !p1Liked })}
+                    style={{ margin: '0 auto', cursor: 'pointer' }}
+                    title={`Voto de ${p1.name}. Clic para cambiar.`}
                   >
                     {p1Liked ? '❤️' : '🤍'}
                   </button>
@@ -123,13 +119,9 @@ export default function ComparisonTable({
                 <td style={{ textAlign: 'center' }}>
                   <button
                     className={`heart-toggle-btn ${p2Liked ? 'liked' : ''}`}
-                    onClick={() => {
-                      if (currentPartnerId === 'p2') {
-                        onToggleReaction(item.id, { partnerId: 'p2', liked: !p2Liked });
-                      }
-                    }}
-                    style={{ margin: '0 auto', cursor: currentPartnerId === 'p2' ? 'pointer' : 'default' }}
-                    title={currentPartnerId === 'p2' ? 'Clic para cambiar voto' : `Voto de ${p2.name}`}
+                    onClick={() => onToggleReaction(item.id, { partnerId: 'p2', liked: !p2Liked })}
+                    style={{ margin: '0 auto', cursor: 'pointer' }}
+                    title={`Voto de ${p2.name}. Clic para cambiar.`}
                   >
                     {p2Liked ? '❤️' : '🤍'}
                   </button>
