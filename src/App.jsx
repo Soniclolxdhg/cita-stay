@@ -11,6 +11,7 @@ import CoupleSettingsModal from './components/CoupleSettingsModal';
 import CommentsModal from './components/CommentsModal';
 import MobileBottomNav from './components/MobileBottomNav';
 import AuthScreen from './components/AuthScreen';
+import SharePartnerModal from './components/SharePartnerModal';
 import { Plus, Sparkles, Heart } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
@@ -26,14 +27,26 @@ export default function App() {
     return saved || 'AMOR-2026';
   });
 
-  // Authentication state
-  const [isAuthenticated, setIsAuthenticated] = useState(() => {
-    return localStorage.getItem('cita_authenticated') === 'true';
+  // Partner identity for this device (p1 or p2) - automatically reads from invite link!
+  const [currentPartnerId, setCurrentPartnerId] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    const partnerFromUrl = params.get('partner') || params.get('join');
+    if (partnerFromUrl === 'p2' || partnerFromUrl === 'p1') {
+      localStorage.setItem('cita_partner_id', partnerFromUrl);
+      return partnerFromUrl;
+    }
+    return localStorage.getItem('cita_partner_id') || 'p1';
   });
 
-  // Partner identity for this device (p1 or p2)
-  const [currentPartnerId, setCurrentPartnerId] = useState(() => {
-    return localStorage.getItem('cita_partner_id') || 'p1';
+  // Authentication state - automatically authenticates if opening personalized invite link!
+  const [isAuthenticated, setIsAuthenticated] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('space') && (params.get('partner') || params.get('join'))) {
+      localStorage.setItem('cita_authenticated', 'true');
+      localStorage.setItem('cita_space_id', params.get('space').toUpperCase().trim());
+      return true;
+    }
+    return localStorage.getItem('cita_authenticated') === 'true';
   });
 
   // Custom Gemini API Key (optional)
@@ -65,6 +78,7 @@ export default function App() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [activeCommentItem, setActiveCommentItem] = useState(null);
 
   // Toast notification
@@ -88,6 +102,11 @@ export default function App() {
     }
     const newUrl = window.location.pathname + '?space=' + newSpaceId;
     window.history.pushState({ path: newUrl }, '', newUrl);
+
+    // If Partner 1 just created the space, open the invite modal immediately so they can send the WhatsApp link!
+    if (partnerId === 'p1') {
+      setTimeout(() => setIsShareModalOpen(true), 400);
+    }
   };
 
   const handleLogout = () => {
@@ -380,6 +399,7 @@ export default function App() {
           accommodationsCount={spaceData.accommodations.length}
           matchesCount={matchesCount}
           onLogout={handleLogout}
+          onOpenShareModal={() => setIsShareModalOpen(true)}
         />
 
         {/* Trip Banner & Configuration */}
@@ -486,16 +506,27 @@ export default function App() {
         apiKey={apiKey}
       />
 
-      {/* Couple Settings & Share Modal */}
+      {/* Couple Settings Modal */}
       <CoupleSettingsModal
         isOpen={isSettingsModalOpen}
         onClose={() => setIsSettingsModalOpen(false)}
         spaceId={spaceData.id}
         tripName={spaceData.name}
         partners={spaceData.partners}
+        currentPartnerId={currentPartnerId}
         onUpdateTrip={handleUpdateTrip}
         apiKey={apiKey}
         onUpdateApiKey={handleUpdateApiKey}
+      />
+
+      {/* Share & Invite Partner Modal */}
+      <SharePartnerModal
+        isOpen={isShareModalOpen}
+        onClose={() => setIsShareModalOpen(false)}
+        spaceId={spaceData.id}
+        tripName={spaceData.name}
+        partners={spaceData.partners}
+        currentPartnerId={currentPartnerId}
       />
 
       {/* Accommodation Comments Modal */}

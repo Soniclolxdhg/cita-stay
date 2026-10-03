@@ -10,6 +10,7 @@ export default function CoupleSettingsModal({
   spaceId,
   tripName,
   partners,
+  currentPartnerId = 'p1',
   onUpdateTrip,
   apiKey,
   onUpdateApiKey
@@ -24,10 +25,18 @@ export default function CoupleSettingsModal({
 
   if (!isOpen) return null;
 
-  const shareUrl = window.location.origin + window.location.pathname + '?space=' + spaceId;
+  const targetRole = currentPartnerId === 'p1' ? 'p2' : 'p1';
+  const targetPartnerName = partners[targetRole === 'p2' ? 'partner2' : 'partner1']?.name || 'tu pareja';
+  const targetPartnerAvatar = partners[targetRole === 'p2' ? 'partner2' : 'partner1']?.avatar || '💌';
+
+  const baseUrl = window.location.origin + window.location.pathname;
+  const partnerShareUrl = `${baseUrl}?space=${spaceId}&partner=${targetRole}`;
+
+  const whatsappMsg = `¡Hola mi amor! 💕 Creé nuestro nido en Cita Stay para que elijamos y votemos nuestros alojamientos juntos.\n\nToca aquí para entrar directamente como ${targetPartnerAvatar} ${targetPartnerName}:\n${partnerShareUrl}`;
+  const whatsappUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(whatsappMsg)}`;
 
   const handleCopyLink = () => {
-    navigator.clipboard.writeText(shareUrl);
+    navigator.clipboard.writeText(partnerShareUrl);
     setCopied(true);
     setTimeout(() => setCopied(false), 2500);
   };
@@ -64,32 +73,42 @@ export default function CoupleSettingsModal({
 
         {/* Share Link Banner */}
         <div style={{ background: 'var(--rose-50)', border: '1px solid var(--rose-200)', borderRadius: 'var(--radius-lg)', padding: '1.25rem', marginBottom: '1.5rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.4rem' }}>
             <span style={{ fontWeight: 700, fontSize: '0.88rem', color: 'var(--rose-600)', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-              <Share2 size={16} /> Enlace para tu Pareja
+              <Share2 size={16} /> Enlace Exclusivo para {targetPartnerAvatar} {targetPartnerName}
             </span>
             <span style={{ fontSize: '0.78rem', background: 'white', padding: '0.2rem 0.5rem', borderRadius: 'var(--radius-pill)', border: '1px solid var(--rose-200)', fontWeight: 600 }}>
               Código: {spaceId}
             </span>
           </div>
 
-          <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
-            Copia y envíale este enlace por WhatsApp. Al abrirlo, ambos estarán sincronizados en tiempo real y verán los mismos alojamientos:
+          <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginBottom: '0.75rem', lineHeight: '1.4' }}>
+            Al entrar con este enlace, tu pareja entrará <strong>directamente con su propio perfil ({targetPartnerAvatar} {targetPartnerName})</strong> y no como invitado genérico:
           </p>
 
-          <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem' }}>
             <input
               type="text"
               readOnly
-              value={shareUrl}
+              value={partnerShareUrl}
               className="form-input"
               style={{ fontSize: '0.8rem', background: 'white' }}
             />
-            <button className="btn btn-primary btn-sm" onClick={handleCopyLink}>
-              {copied ? <Check size={14} /> : <Copy size={14} />}
+            <button className="btn btn-secondary btn-sm" onClick={handleCopyLink}>
+              {copied ? <Check size={14} color="#10B981" /> : <Copy size={14} />}
               <span>{copied ? '¡Copiado!' : 'Copiar'}</span>
             </button>
           </div>
+
+          <a
+            href={whatsappUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="btn btn-primary btn-sm"
+            style={{ width: '100%', background: 'linear-gradient(135deg, #10B981, #059669)', fontSize: '0.85rem' }}
+          >
+            <span>📲</span> Enviar Invitación por WhatsApp a {targetPartnerName}
+          </a>
         </div>
 
         <form onSubmit={handleSave}>

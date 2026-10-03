@@ -11,7 +11,8 @@ export default function Header({
   onOpenSettingsModal,
   accommodationsCount,
   matchesCount,
-  onLogout
+  onLogout,
+  onOpenShareModal
 }) {
   const [copied, setCopied] = useState(false);
   const currentPartner = partners[currentPartnerId === 'p2' ? 'partner2' : 'partner1'] || {
@@ -19,14 +20,19 @@ export default function Header({
     avatar: '🌸'
   };
 
-  const otherPartner = partners[currentPartnerId === 'p2' ? 'partner1' : 'partner2'] || {
-    name: 'Pareja 2',
+  const targetPartnerRole = currentPartnerId === 'p1' ? 'p2' : 'p1';
+  const otherPartner = partners[targetPartnerRole === 'p2' ? 'partner2' : 'partner1'] || {
+    name: 'tu pareja',
     avatar: '🐻'
   };
 
   const handleCopyLink = () => {
-    const fullUrl = window.location.origin + window.location.pathname + '?space=' + spaceId;
-    navigator.clipboard.writeText(fullUrl);
+    if (onOpenShareModal) {
+      onOpenShareModal();
+      return;
+    }
+    const partnerUrl = `${window.location.origin}${window.location.pathname}?space=${spaceId}&partner=${targetPartnerRole}`;
+    navigator.clipboard.writeText(partnerUrl);
     setCopied(true);
     setTimeout(() => setCopied(false), 2500);
   };
@@ -48,12 +54,13 @@ export default function Header({
         <button
           className="btn btn-secondary btn-sm"
           onClick={handleCopyLink}
-          title="Copiar link para enviar a tu pareja"
+          title={`Invitar a ${otherPartner.name} por WhatsApp o enlace`}
+          style={{ borderColor: 'var(--rose-300)' }}
         >
           {copied ? <Check size={14} color="#10B981" /> : <Share2 size={14} color="#FB7185" />}
           <span>{spaceId}</span>
-          <span style={{ fontSize: '0.75rem', opacity: 0.8 }}>
-            {copied ? '¡Copiado!' : 'Copiar link'}
+          <span style={{ fontSize: '0.75rem', color: 'var(--rose-600)', fontWeight: 700 }}>
+            {copied ? '¡Copiado!' : `Invitar a ${otherPartner.name}`}
           </span>
         </button>
 
