@@ -253,8 +253,8 @@ export default function AuthScreen({
   }, []);
 
   return (
-    <div className="auth-wrapper">
-      <div className="auth-card" style={{ maxWidth: '480px' }}>
+    <div className="auth-wrapper auth-overlay">
+      <div className="auth-card">
         {/* Brand header */}
         <div className="auth-header">
           <div className="auth-logo-badge">
