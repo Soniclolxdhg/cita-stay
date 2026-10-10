@@ -655,8 +655,10 @@ app.post('/api/auth/register-couple', authRateLimiter, async (req, res) => {
     password,
     name,
     avatar = '🌸',
+    p1Gender = 'female',
     partnerName,
     partnerAvatar = '🐻',
+    p2Gender = 'male',
     tripName = 'Nuestra Escapada Romántica 💕',
     nights = 3,
     currency = 'CLP',
@@ -702,8 +704,20 @@ app.post('/api/auth/register-couple', authRateLimiter, async (req, res) => {
     updatedAt: new Date().toISOString(),
     ownerEmail: email.toLowerCase().trim(),
     partners: {
-      partner1: { id: 'p1', name: p1DisplayName, avatar: avatar || '🌸', color: '#F472B6' },
-      partner2: { id: 'p2', name: p2DisplayName, avatar: partnerAvatar || '🐻', color: '#818CF8' }
+      partner1: {
+        id: 'p1',
+        name: p1DisplayName,
+        avatar: avatar || '🌸',
+        gender: p1Gender,
+        color: p1Gender === 'male' ? '#818CF8' : '#F472B6'
+      },
+      partner2: {
+        id: 'p2',
+        name: p2DisplayName,
+        avatar: partnerAvatar || '🐻',
+        gender: p2Gender,
+        color: p2Gender === 'female' ? '#F472B6' : '#818CF8'
+      }
     },
     accommodations: withExamples ? createDefaultSpace(cleanId).accommodations : []
   };
@@ -733,7 +747,7 @@ app.post('/api/auth/register-couple', authRateLimiter, async (req, res) => {
 
 // 2. Partner 2 registers their own separate account and links to their partner's Space
 app.post('/api/auth/register-partner', authRateLimiter, async (req, res) => {
-  const { email, password, name, avatar = '🐻', spaceId, pin = '' } = req.body;
+  const { email, password, name, avatar = '🐻', gender = 'female', spaceId, pin = '' } = req.body;
 
   if (!email || !email.includes('@')) {
     return res.status(400).json({ error: 'Ingresa un correo electrónico válido.' });
@@ -769,7 +783,8 @@ app.post('/api/auth/register-partner', authRateLimiter, async (req, res) => {
     id: 'p2',
     name: p2DisplayName,
     avatar: avatar || '🐻',
-    color: '#818CF8'
+    gender: gender || 'female',
+    color: gender === 'female' ? '#F472B6' : '#818CF8'
   };
   const token = crypto.randomUUID();
   space.tokens = Array.isArray(space.tokens) ? space.tokens : [];

@@ -2,9 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X, Copy, Check, Share2, Key } from 'lucide-react';
 
 import GoogleAuthModal from './GoogleAuthModal';
-
-const AVATARS_P1 = ['🌸', '🦊', '🐱', '🐰', '🥑', '🌺', '✨', '🍓'];
-const AVATARS_P2 = ['🐻', '🦁', '🐨', '🐼', '🌿', '🌊', '🚀', '☕'];
+import AvatarPicker, { EMOJI_SETS } from './AvatarPicker';
 
 export default function CoupleSettingsModal({
   isOpen,
@@ -22,11 +20,33 @@ export default function CoupleSettingsModal({
   const [localTripName, setLocalTripName] = useState(tripName || '');
   const [p1Name, setP1Name] = useState(partners.partner1?.name || 'Cami');
   const [p1Avatar, setP1Avatar] = useState(partners.partner1?.avatar || '🌸');
+  const [p1Gender, setP1Gender] = useState(() => {
+    return partners.partner1?.gender || (EMOJI_SETS.male.includes(partners.partner1?.avatar) ? 'male' : 'female');
+  });
+
   const [p2Name, setP2Name] = useState(partners.partner2?.name || 'Nico');
   const [p2Avatar, setP2Avatar] = useState(partners.partner2?.avatar || '🐻');
+  const [p2Gender, setP2Gender] = useState(() => {
+    return partners.partner2?.gender || (EMOJI_SETS.female.includes(partners.partner2?.avatar) ? 'female' : 'male');
+  });
+
   const [localKey, setLocalKey] = useState(apiKey || '');
   const [copied, setCopied] = useState(false);
   const [isGoogleModalOpen, setIsGoogleModalOpen] = useState(false);
+
+  // Sync state whenever modal opens
+  useEffect(() => {
+    if (isOpen) {
+      setLocalTripName(tripName || '');
+      setP1Name(partners.partner1?.name || '');
+      setP1Avatar(partners.partner1?.avatar || '🌸');
+      setP1Gender(partners.partner1?.gender || (EMOJI_SETS.male.includes(partners.partner1?.avatar) ? 'male' : 'female'));
+      setP2Name(partners.partner2?.name || '');
+      setP2Avatar(partners.partner2?.avatar || '🐻');
+      setP2Gender(partners.partner2?.gender || (EMOJI_SETS.female.includes(partners.partner2?.avatar) ? 'female' : 'male'));
+      setLocalKey(apiKey || '');
+    }
+  }, [isOpen, tripName, partners, apiKey]);
 
   // Q7: Body scroll lock & U6: Escape key listener
   useEffect(() => {
@@ -69,8 +89,20 @@ export default function CoupleSettingsModal({
     onUpdateTrip({
       name: localTripName,
       partners: {
-        partner1: { id: 'p1', name: p1Name.trim(), avatar: p1Avatar, color: '#F472B6' },
-        partner2: { id: 'p2', name: p2Name.trim(), avatar: p2Avatar, color: '#818CF8' }
+        partner1: {
+          id: 'p1',
+          name: p1Name.trim(),
+          avatar: p1Avatar,
+          gender: p1Gender,
+          color: p1Gender === 'male' ? '#818CF8' : '#F472B6'
+        },
+        partner2: {
+          id: 'p2',
+          name: p2Name.trim(),
+          avatar: p2Avatar,
+          gender: p2Gender,
+          color: p2Gender === 'female' ? '#F472B6' : '#818CF8'
+        }
       }
     });
 
@@ -154,78 +186,66 @@ export default function CoupleSettingsModal({
 
           {/* Partner 1 config */}
           <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border-soft)', borderRadius: 'var(--radius-md)', padding: '1rem', marginBottom: '1rem' }}>
-            <label className="form-label" style={{ color: 'var(--rose-600)' }}>
-              Pareja 1 (🌸)
-            </label>
-            <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', marginBottom: '0.5rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' }}>
+              <label className="form-label" style={{ color: p1Gender === 'male' ? '#6366F1' : 'var(--rose-600)', margin: 0, fontWeight: 700 }}>
+                Pareja 1 ({p1Avatar} {p1Name || 'Él/Ella'})
+              </label>
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                {p1Gender === 'male' ? '👨 Él' : p1Gender === 'female' ? '👩 Ella' : '✨ Neutro'}
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', marginBottom: '0.4rem' }}>
               <input
                 type="text"
                 value={p1Name}
                 onChange={(e) => setP1Name(e.target.value)}
-                placeholder="Nombre de ella o él"
+                placeholder="Nombre (ej: Pooh o Cami)"
                 className="form-input"
                 style={{ flex: 1 }}
               />
-              <span style={{ fontSize: '1.5rem', padding: '0 0.5rem' }}>{p1Avatar}</span>
+              <span style={{ fontSize: '1.6rem', padding: '0 0.5rem' }}>{p1Avatar}</span>
             </div>
-            <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
-              {AVATARS_P1.map((av) => (
-                <button
-                  key={av}
-                  type="button"
-                  onClick={() => setP1Avatar(av)}
-                  style={{
-                    background: p1Avatar === av ? 'var(--rose-200)' : 'white',
-                    border: '1px solid var(--rose-200)',
-                    borderRadius: '50%',
-                    width: '32px',
-                    height: '32px',
-                    fontSize: '1.1rem',
-                    cursor: 'pointer'
-                  }}
-                >
-                  {av}
-                </button>
-              ))}
-            </div>
+
+            <AvatarPicker
+              selectedAvatar={p1Avatar}
+              onSelectAvatar={setP1Avatar}
+              gender={p1Gender}
+              onSelectGender={setP1Gender}
+              label="Rol / Género de Pareja 1:"
+            />
           </div>
 
           {/* Partner 2 config */}
           <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border-soft)', borderRadius: 'var(--radius-md)', padding: '1rem', marginBottom: '1.25rem' }}>
-            <label className="form-label" style={{ color: 'var(--lavender-500)' }}>
-              Pareja 2 (🐻)
-            </label>
-            <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', marginBottom: '0.5rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' }}>
+              <label className="form-label" style={{ color: p2Gender === 'female' ? 'var(--rose-600)' : 'var(--lavender-500)', margin: 0, fontWeight: 700 }}>
+                Pareja 2 ({p2Avatar} {p2Name || 'Ella/Él'})
+              </label>
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                {p2Gender === 'female' ? '👩 Ella' : p2Gender === 'male' ? '👨 Él' : '✨ Neutro'}
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', marginBottom: '0.4rem' }}>
               <input
                 type="text"
                 value={p2Name}
                 onChange={(e) => setP2Name(e.target.value)}
-                placeholder="Nombre de tu pareja"
+                placeholder="Nombre de tu pareja (ej: Maramor)"
                 className="form-input"
                 style={{ flex: 1 }}
               />
-              <span style={{ fontSize: '1.5rem', padding: '0 0.5rem' }}>{p2Avatar}</span>
+              <span style={{ fontSize: '1.6rem', padding: '0 0.5rem' }}>{p2Avatar}</span>
             </div>
-            <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
-              {AVATARS_P2.map((av) => (
-                <button
-                  key={av}
-                  type="button"
-                  onClick={() => setP2Avatar(av)}
-                  style={{
-                    background: p2Avatar === av ? 'var(--lavender-200)' : 'white',
-                    border: '1px solid var(--lavender-200)',
-                    borderRadius: '50%',
-                    width: '32px',
-                    height: '32px',
-                    fontSize: '1.1rem',
-                    cursor: 'pointer'
-                  }}
-                >
-                  {av}
-                </button>
-              ))}
-            </div>
+
+            <AvatarPicker
+              selectedAvatar={p2Avatar}
+              onSelectAvatar={setP2Avatar}
+              gender={p2Gender}
+              onSelectGender={setP2Gender}
+              label="Rol / Género de Pareja 2:"
+            />
           </div>
 
           {/* Optional Gemini API Key */}

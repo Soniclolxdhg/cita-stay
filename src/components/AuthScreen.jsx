@@ -1,8 +1,6 @@
 import React, { useState } from 'react';
 import { Sparkles, ArrowRight, Compass, Lock, UserPlus, LogIn, Heart } from 'lucide-react';
-
-const AVATARS_1 = ['🌸', '🦊', '🐱', '🐰', '🥑', '🌺', '✨', '🍓'];
-const AVATARS_2 = ['🐻', '🦁', '🐨', '🐼', '🌿', '🌊', '🚀', '☕'];
+import AvatarPicker, { EMOJI_SETS } from './AvatarPicker';
 
 export default function AuthScreen({
   initialSpaceId,
@@ -22,17 +20,20 @@ export default function AuthScreen({
   // Register Partner 1 state (Creating space)
   const [p1Name, setP1Name] = useState('');
   const [p1Avatar, setP1Avatar] = useState('🌸');
+  const [p1Gender, setP1Gender] = useState('female');
   const [registerEmail, setRegisterEmail] = useState('');
   const [registerPassword, setRegisterPassword] = useState('');
   const [p2Name, setP2Name] = useState('');
   const [p2Avatar, setP2Avatar] = useState('🐻');
+  const [p2Gender, setP2Gender] = useState('male');
   const [tripName, setTripName] = useState('');
   const [withExamples, setWithExamples] = useState(false);
 
   // Register Partner 2 state (Joining partner space)
   const [joinCode, setJoinCode] = useState(initialSpaceId || '');
   const [partnerJoinName, setPartnerJoinName] = useState('');
-  const [partnerJoinAvatar, setPartnerJoinAvatar] = useState('🐻');
+  const [partnerJoinAvatar, setPartnerJoinAvatar] = useState('🌸');
+  const [partnerJoinGender, setPartnerJoinGender] = useState('female');
   const [partnerJoinEmail, setPartnerJoinEmail] = useState('');
   const [partnerJoinPassword, setPartnerJoinPassword] = useState('');
   const [joinPin, setJoinPin] = useState('');
@@ -108,10 +109,12 @@ export default function AuthScreen({
         body: JSON.stringify({
           name: p1Name.trim(),
           avatar: p1Avatar,
+          p1Gender,
           email: registerEmail.trim(),
           password: registerPassword,
           partnerName: p2Name.trim() || 'Mi Pareja',
           partnerAvatar: p2Avatar,
+          p2Gender,
           tripName: tripName.trim() || `Escapada de ${p1Name.trim()} & ${p2Name.trim() || 'Pareja'} 💕`,
           currency: 'CLP',
           withExamples
@@ -167,6 +170,7 @@ export default function AuthScreen({
           spaceId: joinCode.trim(),
           name: partnerJoinName.trim(),
           avatar: partnerJoinAvatar,
+          gender: partnerJoinGender,
           email: partnerJoinEmail.trim(),
           password: partnerJoinPassword,
           pin: joinPin.trim()
@@ -366,32 +370,28 @@ export default function AuthScreen({
 
             {/* Partner 1 Info */}
             <div className="auth-section-box">
-              <label className="form-label" style={{ color: 'var(--rose-600)' }}>
+              <label className="form-label" style={{ color: p1Gender === 'male' ? '#6366F1' : 'var(--rose-600)', fontWeight: 700 }}>
                 1. Tus Datos Personales (Pareja 1)
               </label>
-              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '0.6rem' }}>
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '0.4rem' }}>
                 <input
                   type="text"
-                  placeholder="Tu nombre (ej: Lucas)"
+                  placeholder="Tu nombre (ej: Lucas o Pooh)"
                   value={p1Name}
                   onChange={(e) => setP1Name(e.target.value)}
                   className="form-input"
                   required
                 />
-                <span style={{ fontSize: '1.4rem' }}>{p1Avatar}</span>
+                <span style={{ fontSize: '1.5rem', padding: '0 0.3rem' }}>{p1Avatar}</span>
               </div>
-              <div className="avatar-picker-mini" style={{ marginBottom: '0.75rem' }}>
-                {AVATARS_1.map((av) => (
-                  <button
-                    key={av}
-                    type="button"
-                    onClick={() => setP1Avatar(av)}
-                    className={`avatar-chip ${p1Avatar === av ? 'active' : ''}`}
-                  >
-                    {av}
-                  </button>
-                ))}
-              </div>
+
+              <AvatarPicker
+                selectedAvatar={p1Avatar}
+                onSelectAvatar={setP1Avatar}
+                gender={p1Gender}
+                onSelectGender={setP1Gender}
+                label="¿Eres él o ella?"
+              />
 
               <input
                 type="email"
@@ -414,31 +414,27 @@ export default function AuthScreen({
 
             {/* Partner 2 Info */}
             <div className="auth-section-box">
-              <label className="form-label" style={{ color: 'var(--lavender-500)' }}>
+              <label className="form-label" style={{ color: p2Gender === 'female' ? 'var(--rose-600)' : 'var(--lavender-500)', fontWeight: 700 }}>
                 2. ¿Cómo se llama tu pareja?
               </label>
               <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '0.4rem' }}>
                 <input
                   type="text"
-                  placeholder="Nombre de tu pareja (ej: Romina)"
+                  placeholder="Nombre de tu pareja (ej: Romina o Maramor)"
                   value={p2Name}
                   onChange={(e) => setP2Name(e.target.value)}
                   className="form-input"
                 />
-                <span style={{ fontSize: '1.4rem' }}>{p2Avatar}</span>
+                <span style={{ fontSize: '1.5rem', padding: '0 0.3rem' }}>{p2Avatar}</span>
               </div>
-              <div className="avatar-picker-mini">
-                {AVATARS_2.map((av) => (
-                  <button
-                    key={av}
-                    type="button"
-                    onClick={() => setP2Avatar(av)}
-                    className={`avatar-chip ${p2Avatar === av ? 'active' : ''}`}
-                  >
-                    {av}
-                  </button>
-                ))}
-              </div>
+
+              <AvatarPicker
+                selectedAvatar={p2Avatar}
+                onSelectAvatar={setP2Avatar}
+                gender={p2Gender}
+                onSelectGender={setP2Gender}
+                label="¿Tu pareja es él o ella?"
+              />
             </div>
 
             {/* Trip Name */}
@@ -498,32 +494,28 @@ export default function AuthScreen({
             </div>
 
             <div className="auth-section-box">
-              <label className="form-label" style={{ color: 'var(--lavender-500)' }}>
+              <label className="form-label" style={{ color: partnerJoinGender === 'female' ? 'var(--rose-600)' : 'var(--lavender-500)', fontWeight: 700 }}>
                 Tus Datos de Cuenta (Pareja 2)
               </label>
-              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '0.6rem' }}>
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '0.4rem' }}>
                 <input
                   type="text"
-                  placeholder="Tu nombre (ej: Romina)"
+                  placeholder="Tu nombre (ej: Romina o Maramor)"
                   value={partnerJoinName}
                   onChange={(e) => setPartnerJoinName(e.target.value)}
                   className="form-input"
                   required
                 />
-                <span style={{ fontSize: '1.4rem' }}>{partnerJoinAvatar}</span>
+                <span style={{ fontSize: '1.5rem', padding: '0 0.3rem' }}>{partnerJoinAvatar}</span>
               </div>
-              <div className="avatar-picker-mini" style={{ marginBottom: '0.75rem' }}>
-                {AVATARS_2.map((av) => (
-                  <button
-                    key={av}
-                    type="button"
-                    onClick={() => setPartnerJoinAvatar(av)}
-                    className={`avatar-chip ${partnerJoinAvatar === av ? 'active' : ''}`}
-                  >
-                    {av}
-                  </button>
-                ))}
-              </div>
+
+              <AvatarPicker
+                selectedAvatar={partnerJoinAvatar}
+                onSelectAvatar={setPartnerJoinAvatar}
+                gender={partnerJoinGender}
+                onSelectGender={setPartnerJoinGender}
+                label="¿Eres ella o él?"
+              />
 
               <input
                 type="email"
