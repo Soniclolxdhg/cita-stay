@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import * as cheerio from 'cheerio';
 import dotenv from 'dotenv';
+import pg from 'pg';
 
 dotenv.config();
 
@@ -149,8 +150,127 @@ function getRandomPhoto() {
   return ROMANTIC_PHOTOS[Math.floor(Math.random() * ROMANTIC_PHOTOS.length)];
 }
 
-// In-memory cache + file storage helper
+// In-memory cache + storage helper
 let spacesCache = {};
+
+// Permanent PostgreSQL Database Integration (Supabase / Neon / Postgres)
+let dbPool = null;
+const dbConnectionString = process.env.POSTGRES_PRISMA_URL || process.env.POSTGRES_URL_NON_POOLING || process.env.POSTGRES_URL;
+
+if (dbConnectionString) {
+  try {
+    const parsedUrl = new URL(dbConnectionString);
+    dbPool = new pg.Pool({
+      user: decodeURIComponent(parsedUrl.username),
+      password: decodeURIComponent(parsedUrl.password),
+      host: parsedUrl.hostname,
+      port: parsedUrl.port ? parseInt(parsedUrl.port, 10) : 5432,
+      database: parsedUrl.pathname.replace(/^\//, ''),
+      ssl: { rejectUnauthorized: false },
+      max: 10,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 8000
+    });
+
+    dbPool.on('error', (err) => {
+      console.warn('Supabase PostgreSQL pool warning:', err.message);
+    });
+  } catch (err) {
+    console.warn('Could not parse PostgreSQL connection string:', err.message);
+  }
+}
+
+let dbInitPromise = null;
+async function initDatabase() {
+  if (!dbPool) return;
+  try {
+    const client = await dbPool.connect();
+    try {
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS spaces (
+          id VARCHAR(255) PRIMARY KEY,
+          data JSONB NOT NULL,
+          updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_spaces_updated_at ON spaces(updated_at);
+      `);
+
+      // Hydrate in-memory cache with all existing spaces
+      const res = await client.query('SELECT id, data FROM spaces;');
+      for (const row of res.rows) {
+        if (row.id && row.data) {
+          spacesCache[row.id] = row.data;
+        }
+      }
+      console.log(`✓ Supabase PostgreSQL conectado: ${res.rows.length} espacio(s) sincronizado(s)`);
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    console.warn('Aviso de inicialización Supabase:', err.message);
+  }
+}
+
+function ensureDbInit() {
+  if (!dbPool) return Promise.resolve();
+  if (!dbInitPromise) {
+    dbInitPromise = initDatabase();
+  }
+  return dbInitPromise;
+}
+
+// Trigger initial connection
+ensureDbInit();
+
+async function getSpaceFromDb(spaceId) {
+  if (!dbPool || !spaceId) return null;
+  try {
+    await ensureDbInit();
+    const res = await dbPool.query('SELECT data FROM spaces WHERE id = $1', [spaceId]);
+    if (res.rows.length > 0 && res.rows[0].data) {
+      return res.rows[0].data;
+    }
+  } catch (err) {
+    console.warn(`Error reading space ${spaceId} from Supabase:`, err.message);
+  }
+  return null;
+}
+
+async function findSpaceByEmailFromDb(email) {
+  if (!dbPool || !email) return null;
+  try {
+    await ensureDbInit();
+    const cleanEmail = email.toLowerCase().trim();
+    const res = await dbPool.query(
+      `SELECT id, data FROM spaces 
+       WHERE lower(data->>'ownerEmail') = $1 
+          OR lower(data->'googleOwner'->>'email') = $1
+       LIMIT 1`,
+      [cleanEmail]
+    );
+    if (res.rows.length > 0 && res.rows[0].data) {
+      return res.rows[0].data;
+    }
+  } catch (err) {
+    console.warn(`Error finding space by email from Supabase:`, err.message);
+  }
+  return null;
+}
+
+async function saveSpaceToDb(spaceId, spaceData) {
+  if (!dbPool || !spaceId || !spaceData) return;
+  try {
+    await ensureDbInit();
+    await dbPool.query(
+      `INSERT INTO spaces (id, data, updated_at)
+       VALUES ($1, $2, NOW())
+       ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, updated_at = NOW();`,
+      [spaceId, JSON.stringify(spaceData)]
+    );
+  } catch (err) {
+    console.warn(`Error saving space ${spaceId} to Supabase:`, err.message);
+  }
+}
 
 // Permanent Cloud KV Integration (Upstash Redis / Vercel KV via REST)
 const KV_URL = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
@@ -205,7 +325,7 @@ function loadSpaces() {
   }
 }
 
-function saveSpaces(spaceIdToCloud = null) {
+function saveSpaces(spaceIdToPersist = null) {
   try {
     if (!fs.existsSync(DATA_DIR)) {
       fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -215,16 +335,53 @@ function saveSpaces(spaceIdToCloud = null) {
     console.error('Error saving spaces to disk:', err.message);
   }
 
+  // Persist to Supabase PostgreSQL (Fixes D4)
+  if (dbPool) {
+    if (spaceIdToPersist && spacesCache[spaceIdToPersist]) {
+      saveSpaceToDb(spaceIdToPersist, spacesCache[spaceIdToPersist]);
+    } else {
+      for (const id of Object.keys(spacesCache)) {
+        saveSpaceToDb(id, spacesCache[id]);
+      }
+    }
+  }
+
   // Also sync to cloud KV if configured
   if (KV_URL && KV_TOKEN) {
-    if (spaceIdToCloud && spacesCache[spaceIdToCloud]) {
-      saveSpaceToCloud(spaceIdToCloud, spacesCache[spaceIdToCloud]);
+    if (spaceIdToPersist && spacesCache[spaceIdToPersist]) {
+      saveSpaceToCloud(spaceIdToPersist, spacesCache[spaceIdToPersist]);
     } else {
       for (const id of Object.keys(spacesCache)) {
         saveSpaceToCloud(id, spacesCache[id]);
       }
     }
   }
+}
+
+// Unified space retriever: memory -> disk -> Supabase -> Upstash
+async function getOrLoadSpace(cleanId) {
+  if (!cleanId) return null;
+  if (spacesCache[cleanId]) return spacesCache[cleanId];
+  loadSpaces();
+  if (spacesCache[cleanId]) return spacesCache[cleanId];
+
+  if (dbPool) {
+    const fromDb = await getSpaceFromDb(cleanId);
+    if (fromDb) {
+      spacesCache[cleanId] = fromDb;
+      return fromDb;
+    }
+  }
+
+  if (KV_URL && KV_TOKEN) {
+    const fromCloud = await getSpaceFromCloud(cleanId);
+    if (fromCloud) {
+      spacesCache[cleanId] = fromCloud;
+      return fromCloud;
+    }
+  }
+
+  return null;
 }
 
 loadSpaces();
@@ -362,13 +519,6 @@ function createDefaultSpace(spaceId) {
 
 // Routes
 
-// Routes
-
-// Health check
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
-});
-
 // S1, D7: Auth: Create a custom couple space (generates secure token & avoids ID collision)
 app.post('/api/auth/create-space', authRateLimiter, (req, res) => {
   const {
@@ -416,6 +566,15 @@ app.post('/api/auth/create-space', authRateLimiter, (req, res) => {
   res.status(201).json({ success: true, space: sanitizeSpace(newSpace), token });
 });
 
+// Health check with Supabase database status
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    database: dbPool ? 'supabase_postgres' : (KV_URL ? 'kv_cloud' : 'local_disk'),
+    timestamp: new Date().toISOString()
+  });
+});
+
 // S1, S2: Auth: Join an existing couple space (404 on not found, strict PIN validation, token issued)
 app.post('/api/auth/join-space', authRateLimiter, async (req, res) => {
   const { spaceId, pin = '', partnerChoice = '' } = req.body;
@@ -425,22 +584,10 @@ app.post('/api/auth/join-space', authRateLimiter, async (req, res) => {
     return res.status(400).json({ error: 'Ingresa un código de nido válido.' });
   }
 
-  if (!spacesCache[cleanId]) {
-    loadSpaces();
-  }
-
-  // Check cloud KV if available
-  if (!spacesCache[cleanId] && KV_URL && KV_TOKEN) {
-    const fromCloud = await getSpaceFromCloud(cleanId);
-    if (fromCloud) spacesCache[cleanId] = fromCloud;
-  }
-
-  // S1: Never auto-create a space on join; return 404 if it doesn't exist
-  if (!spacesCache[cleanId]) {
+  const space = await getOrLoadSpace(cleanId);
+  if (!space) {
     return res.status(404).json({ error: 'No encontramos ese nido. Por favor verifica el código e intenta nuevamente.' });
   }
-
-  const space = spacesCache[cleanId];
 
   // S2: Strict PIN validation
   if (space.pin && space.pin !== String(pin).trim()) {
@@ -458,15 +605,11 @@ app.post('/api/auth/join-space', authRateLimiter, async (req, res) => {
 });
 
 // S2: Dedicated PIN verification endpoint
-app.post('/api/auth/verify-pin', authRateLimiter, (req, res) => {
+app.post('/api/auth/verify-pin', authRateLimiter, async (req, res) => {
   const { spaceId, pin } = req.body;
   const cleanId = (spaceId || '').toUpperCase().trim();
 
-  if (!spacesCache[cleanId]) {
-    loadSpaces();
-  }
-
-  const space = spacesCache[cleanId];
+  const space = await getOrLoadSpace(cleanId);
   if (!space) {
     return res.status(404).json({ error: 'Nido no encontrado' });
   }
@@ -484,7 +627,7 @@ app.post('/api/auth/verify-pin', authRateLimiter, (req, res) => {
 });
 
 // U1: Auth: Honest email access & space recovery
-app.post(['/api/auth/email', '/api/auth/google'], authRateLimiter, (req, res) => {
+app.post(['/api/auth/email', '/api/auth/google'], authRateLimiter, async (req, res) => {
   const { email, name, partnerName = '', spaceName = '' } = req.body;
 
   if (!email) {
@@ -493,11 +636,20 @@ app.post(['/api/auth/email', '/api/auth/google'], authRateLimiter, (req, res) =>
 
   const cleanEmail = email.toLowerCase().trim();
 
-  // Search if a space already exists linked to this email
-  const existingId = Object.keys(spacesCache).find((id) => {
+  // Search if a space already exists linked to this email in memory
+  let existingId = Object.keys(spacesCache).find((id) => {
     return spacesCache[id]?.ownerEmail?.toLowerCase().trim() === cleanEmail ||
            spacesCache[id]?.googleOwner?.email?.toLowerCase().trim() === cleanEmail;
   });
+
+  // If not found in memory, search in Supabase PostgreSQL
+  if (!existingId && dbPool) {
+    const fromDb = await findSpaceByEmailFromDb(cleanEmail);
+    if (fromDb && fromDb.id) {
+      spacesCache[fromDb.id] = fromDb;
+      existingId = fromDb.id;
+    }
+  }
 
   if (existingId) {
     const space = spacesCache[existingId];
@@ -563,12 +715,13 @@ app.post(['/api/auth/email', '/api/auth/google'], authRateLimiter, (req, res) =>
 });
 
 // Link email account to an existing space
-app.post(['/api/space/:spaceId/link-email', '/api/space/:spaceId/link-google'], (req, res) => {
+app.post(['/api/space/:spaceId/link-email', '/api/space/:spaceId/link-google'], async (req, res) => {
   const { spaceId } = req.params;
   const { email, name } = req.body;
   const cleanId = (spaceId || '').toUpperCase().trim();
 
-  if (!cleanId || !spacesCache[cleanId]) {
+  const space = await getOrLoadSpace(cleanId);
+  if (!space) {
     return res.status(404).json({ error: 'Espacio no encontrado' });
   }
 
@@ -589,7 +742,7 @@ app.post(['/api/space/:spaceId/link-email', '/api/space/:spaceId/link-google'], 
 });
 
 // D1, D2: Synchronize space state with Last-Write-Wins (LWW) and respect deleted tombstones
-app.post('/api/space/:spaceId/sync', (req, res) => {
+app.post('/api/space/:spaceId/sync', async (req, res) => {
   const { spaceId } = req.params;
   const cleanId = (spaceId || 'default').toUpperCase().trim();
   const incoming = req.body;
@@ -598,11 +751,7 @@ app.post('/api/space/:spaceId/sync', (req, res) => {
     return res.status(400).json({ error: 'Payload de sincronización inválido' });
   }
 
-  if (!spacesCache[cleanId]) {
-    loadSpaces();
-  }
-
-  const existing = spacesCache[cleanId] || {};
+  const existing = (await getOrLoadSpace(cleanId)) || {};
 
   // Combine deleted tombstones so deleted items NEVER resurrect (Fixes D1)
   const existingDeleted = Array.isArray(existing.deletedAccIds) ? existing.deletedAccIds : [];
@@ -695,43 +844,30 @@ app.get('/api/space/:spaceId', async (req, res) => {
   const { spaceId } = req.params;
   const cleanId = (spaceId || 'default').toUpperCase().trim();
 
-  if (!spacesCache[cleanId]) {
-    loadSpaces();
-  }
-
-  // Check cloud KV if available
-  if (!spacesCache[cleanId] && KV_URL && KV_TOKEN) {
-    const fromCloud = await getSpaceFromCloud(cleanId);
-    if (fromCloud) spacesCache[cleanId] = fromCloud;
-  }
-
-  if (!spacesCache[cleanId]) {
+  let space = await getOrLoadSpace(cleanId);
+  if (!space) {
     // Only auto-initialize demo items for the official demo spaces
     if (cleanId === 'AMOR-2026' || cleanId === 'DEMO') {
-      spacesCache[cleanId] = createDefaultSpace(cleanId);
+      space = createDefaultSpace(cleanId);
+      spacesCache[cleanId] = space;
       saveSpaces(cleanId);
     } else {
       return res.status(404).json({ error: 'Nido no encontrado' });
     }
   }
 
-  res.json(sanitizeSpace(spacesCache[cleanId]));
+  res.json(sanitizeSpace(space));
 });
 
 // Update general space configuration (name, currency, nights, partners)
-app.post('/api/space/:spaceId', (req, res) => {
+app.post('/api/space/:spaceId', async (req, res) => {
   const { spaceId } = req.params;
   const cleanId = (spaceId || 'default').toUpperCase().trim();
 
-  if (!spacesCache[cleanId]) {
-    loadSpaces();
-  }
-
-  if (!spacesCache[cleanId]) {
+  const current = await getOrLoadSpace(cleanId);
+  if (!current) {
     return res.status(404).json({ error: 'Nido no encontrado' });
   }
-
-  const current = spacesCache[cleanId];
   const { name, nights, currency, partners } = req.body;
 
   if (name !== undefined) current.name = name;
@@ -746,19 +882,14 @@ app.post('/api/space/:spaceId', (req, res) => {
 });
 
 // Add new accommodation
-app.post('/api/space/:spaceId/accommodations', (req, res) => {
+app.post('/api/space/:spaceId/accommodations', async (req, res) => {
   const { spaceId } = req.params;
   const cleanId = (spaceId || 'default').toUpperCase().trim();
 
-  if (!spacesCache[cleanId]) {
-    loadSpaces();
-  }
-
-  if (!spacesCache[cleanId]) {
+  const current = await getOrLoadSpace(cleanId);
+  if (!current) {
     return res.status(404).json({ error: 'Nido no encontrado' });
   }
-
-  const current = spacesCache[cleanId];
   const now = new Date().toISOString();
   const newAcc = {
     id: 'acc_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
@@ -793,19 +924,14 @@ app.post('/api/space/:spaceId/accommodations', (req, res) => {
 });
 
 // Update accommodation
-app.put('/api/space/:spaceId/accommodations/:accId', (req, res) => {
+app.put('/api/space/:spaceId/accommodations/:accId', async (req, res) => {
   const { spaceId, accId } = req.params;
   const cleanId = (spaceId || 'default').toUpperCase().trim();
 
-  if (!spacesCache[cleanId]) {
-    loadSpaces();
-  }
-
-  if (!spacesCache[cleanId]) {
+  const current = await getOrLoadSpace(cleanId);
+  if (!current) {
     return res.status(404).json({ error: 'Espacio no encontrado' });
   }
-
-  const current = spacesCache[cleanId];
   const index = current.accommodations.findIndex(a => a.id === accId);
 
   if (index === -1) {
@@ -831,19 +957,14 @@ app.put('/api/space/:spaceId/accommodations/:accId', (req, res) => {
 });
 
 // D1: Delete accommodation with tombstone tracking (Never resurrects)
-app.delete('/api/space/:spaceId/accommodations/:accId', (req, res) => {
+app.delete('/api/space/:spaceId/accommodations/:accId', async (req, res) => {
   const { spaceId, accId } = req.params;
   const cleanId = (spaceId || 'default').toUpperCase().trim();
 
-  if (!spacesCache[cleanId]) {
-    loadSpaces();
-  }
-
-  if (!spacesCache[cleanId]) {
+  const current = await getOrLoadSpace(cleanId);
+  if (!current) {
     return res.status(404).json({ error: 'Espacio no encontrado' });
   }
-
-  const current = spacesCache[cleanId];
   current.deletedAccIds = Array.isArray(current.deletedAccIds) ? current.deletedAccIds : [];
   if (!current.deletedAccIds.includes(accId)) {
     current.deletedAccIds.push(accId);
@@ -857,20 +978,15 @@ app.delete('/api/space/:spaceId/accommodations/:accId', (req, res) => {
 });
 
 // Toggle partner reaction / heart / sentiment
-app.post('/api/space/:spaceId/accommodations/:accId/reaction', (req, res) => {
+app.post('/api/space/:spaceId/accommodations/:accId/reaction', async (req, res) => {
   const { spaceId, accId } = req.params;
   const { partnerId, liked, reaction, note } = req.body;
   const cleanId = (spaceId || 'default').toUpperCase().trim();
 
-  if (!spacesCache[cleanId]) {
-    loadSpaces();
-  }
-
-  if (!spacesCache[cleanId]) {
+  const current = await getOrLoadSpace(cleanId);
+  if (!current) {
     return res.status(404).json({ error: 'Espacio no encontrado' });
   }
-
-  const current = spacesCache[cleanId];
   const item = current.accommodations.find(a => a.id === accId);
 
   if (!item) {
@@ -904,20 +1020,15 @@ app.post('/api/space/:spaceId/accommodations/:accId/reaction', (req, res) => {
 });
 
 // Add comment to accommodation
-app.post('/api/space/:spaceId/accommodations/:accId/comment', (req, res) => {
+app.post('/api/space/:spaceId/accommodations/:accId/comment', async (req, res) => {
   const { spaceId, accId } = req.params;
   const { partnerId, text } = req.body;
   const cleanId = (spaceId || 'default').toUpperCase().trim();
 
-  if (!spacesCache[cleanId]) {
-    loadSpaces();
-  }
-
-  if (!spacesCache[cleanId]) {
+  const current = await getOrLoadSpace(cleanId);
+  if (!current) {
     return res.status(404).json({ error: 'Espacio no encontrado' });
   }
-
-  const current = spacesCache[cleanId];
   const item = current.accommodations.find(a => a.id === accId);
 
   if (!item) {
@@ -952,19 +1063,14 @@ app.post('/api/space/:spaceId/accommodations/:accId/comment', (req, res) => {
 });
 
 // Delete comment
-app.delete('/api/space/:spaceId/accommodations/:accId/comment/:commentId', (req, res) => {
+app.delete('/api/space/:spaceId/accommodations/:accId/comment/:commentId', async (req, res) => {
   const { spaceId, accId, commentId } = req.params;
   const cleanId = (spaceId || 'default').toUpperCase().trim();
 
-  if (!spacesCache[cleanId]) {
-    loadSpaces();
-  }
-
-  if (!spacesCache[cleanId]) {
+  const current = await getOrLoadSpace(cleanId);
+  if (!current) {
     return res.status(404).json({ error: 'Espacio no encontrado' });
   }
-
-  const current = spacesCache[cleanId];
   const item = current.accommodations.find(a => a.id === accId);
 
   if (!item || !Array.isArray(item.comments)) {
