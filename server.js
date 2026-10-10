@@ -193,6 +193,19 @@ async function initDatabase() {
           updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
         );
         CREATE INDEX IF NOT EXISTS idx_spaces_updated_at ON spaces(updated_at);
+
+        CREATE TABLE IF NOT EXISTS users (
+          id VARCHAR(255) PRIMARY KEY,
+          email VARCHAR(255) UNIQUE NOT NULL,
+          password_hash TEXT NOT NULL,
+          name VARCHAR(255) NOT NULL,
+          avatar VARCHAR(10) DEFAULT '🌸',
+          space_id VARCHAR(255) NOT NULL,
+          partner_role VARCHAR(10) NOT NULL,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_users_email ON users(lower(email));
+        CREATE INDEX IF NOT EXISTS idx_users_space_id ON users(space_id);
       `);
 
       // Hydrate in-memory cache with all existing spaces
@@ -202,7 +215,15 @@ async function initDatabase() {
           spacesCache[row.id] = row.data;
         }
       }
-      console.log(`✓ Supabase PostgreSQL conectado: ${res.rows.length} espacio(s) sincronizado(s)`);
+
+      // Hydrate in-memory cache with all users
+      const usersRes = await client.query('SELECT * FROM users;');
+      for (const row of usersRes.rows) {
+        if (row.id) {
+          usersCache[row.id] = row;
+        }
+      }
+      console.log(`✓ Supabase PostgreSQL conectado: ${res.rows.length} espacio(s), ${usersRes.rows.length} usuario(s)`);
     } finally {
       client.release();
     }
@@ -221,6 +242,110 @@ function ensureDbInit() {
 
 // Trigger initial connection
 ensureDbInit();
+
+// Built-in secure password hashing (scrypt with random salt & timing-safe verify)
+function hashPassword(password) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const derivedKey = crypto.scryptSync(password, salt, 64);
+  return `${salt}:${derivedKey.toString('hex')}`;
+}
+
+function verifyPassword(password, storedHash) {
+  if (!storedHash || !password) return false;
+  const [salt, key] = storedHash.split(':');
+  if (!salt || !key) return false;
+  try {
+    const derivedKey = crypto.scryptSync(password, salt, 64);
+    return crypto.timingSafeEqual(Buffer.from(key, 'hex'), derivedKey);
+  } catch {
+    return false;
+  }
+}
+
+// User memory cache and file storage fallback
+let usersCache = {};
+const USERS_FILE = path.join(DATA_DIR, 'users.json');
+
+function loadUsers() {
+  try {
+    if (fs.existsSync(USERS_FILE)) {
+      const data = fs.readFileSync(USERS_FILE, 'utf-8');
+      usersCache = JSON.parse(data);
+    }
+  } catch (err) {
+    console.error('Error loading users from disk:', err.message);
+    if (!usersCache) usersCache = {};
+  }
+}
+
+function saveUsers() {
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    fs.writeFileSync(USERS_FILE, JSON.stringify(usersCache, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Error saving users to disk:', err.message);
+  }
+}
+
+loadUsers();
+
+async function findUserByEmail(email) {
+  if (!email) return null;
+  const cleanEmail = email.toLowerCase().trim();
+  if (dbPool) {
+    try {
+      await ensureDbInit();
+      const res = await dbPool.query('SELECT * FROM users WHERE lower(email) = $1 LIMIT 1', [cleanEmail]);
+      if (res.rows.length > 0) return res.rows[0];
+    } catch (err) {
+      console.warn('Error reading user from Supabase:', err.message);
+    }
+  }
+  return Object.values(usersCache).find(u => u.email?.toLowerCase().trim() === cleanEmail) || null;
+}
+
+async function createUser({ email, password, name, avatar, spaceId, partnerRole }) {
+  const cleanEmail = email.toLowerCase().trim();
+  const userId = 'u_' + crypto.randomUUID();
+  const passwordHash = hashPassword(password);
+  const now = new Date().toISOString();
+
+  const user = {
+    id: userId,
+    email: cleanEmail,
+    password_hash: passwordHash,
+    name: name.trim(),
+    avatar: avatar || (partnerRole === 'p2' ? '🐻' : '🌸'),
+    space_id: spaceId,
+    partner_role: partnerRole,
+    created_at: now
+  };
+
+  usersCache[userId] = user;
+  saveUsers();
+
+  if (dbPool) {
+    try {
+      await ensureDbInit();
+      await dbPool.query(`
+        INSERT INTO users (id, email, password_hash, name, avatar, space_id, partner_role, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+        ON CONFLICT (email) DO UPDATE SET
+          name = EXCLUDED.name,
+          avatar = EXCLUDED.avatar,
+          password_hash = EXCLUDED.password_hash,
+          space_id = EXCLUDED.space_id,
+          partner_role = EXCLUDED.partner_role;
+      `, [userId, cleanEmail, passwordHash, name.trim(), user.avatar, spaceId, partnerRole]);
+    } catch (err) {
+      console.warn('Error saving user in Supabase:', err.message);
+    }
+  }
+
+  return user;
+}
 
 async function getSpaceFromDb(spaceId) {
   if (!dbPool || !spaceId) return null;
@@ -518,6 +643,197 @@ function createDefaultSpace(spaceId) {
 }
 
 // Routes
+
+// ==========================================
+// SEPARATE COUPLE ACCOUNTS (EMAIL + PASSWORD)
+// ==========================================
+
+// 1. Partner 1 registers their account and creates their shared Couple Space
+app.post('/api/auth/register-couple', authRateLimiter, async (req, res) => {
+  const {
+    email,
+    password,
+    name,
+    avatar = '🌸',
+    partnerName,
+    partnerAvatar = '🐻',
+    tripName = 'Nuestra Escapada Romántica 💕',
+    nights = 3,
+    currency = 'CLP',
+    withExamples = false
+  } = req.body;
+
+  if (!email || !email.includes('@')) {
+    return res.status(400).json({ error: 'Ingresa un correo electrónico válido.' });
+  }
+  if (!password || password.length < 4) {
+    return res.status(400).json({ error: 'La contraseña debe tener al menos 4 caracteres.' });
+  }
+  if (!name || !name.trim()) {
+    return res.status(400).json({ error: 'Por favor ingresa tu nombre.' });
+  }
+
+  const existingUser = await findUserByEmail(email);
+  if (existingUser) {
+    return res.status(400).json({ error: 'Este correo ya tiene una cuenta registrada. Por favor inicia sesión.' });
+  }
+
+  let cleanId;
+  let attempts = 0;
+  do {
+    const randomDigits = Math.floor(1000 + Math.random() * 9000);
+    cleanId = `AMOR-${randomDigits}`;
+    attempts++;
+  } while (spacesCache[cleanId] && attempts < 50);
+
+  const token = crypto.randomUUID();
+  const p1DisplayName = name.trim();
+  const p2DisplayName = (partnerName || 'Mi Pareja').trim();
+
+  const newSpace = {
+    id: cleanId,
+    name: tripName.trim() || `Escapada de ${p1DisplayName} & ${p2DisplayName} 💕`,
+    nights: Math.max(1, parseInt(nights, 10) || 3),
+    currency: currency || 'CLP',
+    pin: '',
+    tokens: [token],
+    deletedAccIds: [],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    ownerEmail: email.toLowerCase().trim(),
+    partners: {
+      partner1: { id: 'p1', name: p1DisplayName, avatar: avatar || '🌸', color: '#F472B6' },
+      partner2: { id: 'p2', name: p2DisplayName, avatar: partnerAvatar || '🐻', color: '#818CF8' }
+    },
+    accommodations: withExamples ? createDefaultSpace(cleanId).accommodations : []
+  };
+
+  spacesCache[cleanId] = newSpace;
+  saveSpaces(cleanId);
+
+  // Create User 1 account
+  const newUser = await createUser({
+    email,
+    password,
+    name: p1DisplayName,
+    avatar: avatar || '🌸',
+    spaceId: cleanId,
+    partnerRole: 'p1'
+  });
+
+  res.status(201).json({
+    success: true,
+    message: '¡Cuenta creada y espacio vinculado exitosamente!',
+    user: { id: newUser.id, email: newUser.email, name: newUser.name, avatar: newUser.avatar },
+    space: sanitizeSpace(newSpace),
+    partnerRole: 'p1',
+    token
+  });
+});
+
+// 2. Partner 2 registers their own separate account and links to their partner's Space
+app.post('/api/auth/register-partner', authRateLimiter, async (req, res) => {
+  const { email, password, name, avatar = '🐻', spaceId, pin = '' } = req.body;
+
+  if (!email || !email.includes('@')) {
+    return res.status(400).json({ error: 'Ingresa un correo electrónico válido.' });
+  }
+  if (!password || password.length < 4) {
+    return res.status(400).json({ error: 'La contraseña debe tener al menos 4 caracteres.' });
+  }
+  if (!name || !name.trim()) {
+    return res.status(400).json({ error: 'Por favor ingresa tu nombre.' });
+  }
+  const cleanSpaceId = (spaceId || '').toUpperCase().trim();
+  if (!cleanSpaceId) {
+    return res.status(400).json({ error: 'Ingresa el código del nido de tu pareja (ej: AMOR-2026).' });
+  }
+
+  const existingUser = await findUserByEmail(email);
+  if (existingUser) {
+    return res.status(400).json({ error: 'Este correo ya está registrado. Por favor inicia sesión.' });
+  }
+
+  const space = await getOrLoadSpace(cleanSpaceId);
+  if (!space) {
+    return res.status(404).json({ error: 'No encontramos ese nido. Verifica el código e intenta nuevamente.' });
+  }
+
+  if (space.pin && space.pin !== String(pin).trim()) {
+    return res.status(401).json({ error: 'El PIN del espacio es incorrecto.', requiresPin: true });
+  }
+
+  // Update Partner 2 profile in space
+  const p2DisplayName = name.trim();
+  space.partners.partner2 = {
+    id: 'p2',
+    name: p2DisplayName,
+    avatar: avatar || '🐻',
+    color: '#818CF8'
+  };
+  const token = crypto.randomUUID();
+  space.tokens = Array.isArray(space.tokens) ? space.tokens : [];
+  space.tokens.push(token);
+  space.updatedAt = new Date().toISOString();
+  saveSpaces(cleanSpaceId);
+
+  // Create User 2 account linked to this space as p2
+  const newUser = await createUser({
+    email,
+    password,
+    name: p2DisplayName,
+    avatar: avatar || '🐻',
+    spaceId: cleanSpaceId,
+    partnerRole: 'p2'
+  });
+
+  res.status(201).json({
+    success: true,
+    message: `¡Te uniste con éxito al espacio de ${space.partners.partner1?.name || 'tu pareja'}!`,
+    user: { id: newUser.id, email: newUser.email, name: newUser.name, avatar: newUser.avatar },
+    space: sanitizeSpace(space),
+    partnerRole: 'p2',
+    token
+  });
+});
+
+// 3. Either partner logs into their personal account with email + password
+app.post('/api/auth/login-user', authRateLimiter, async (req, res) => {
+  const { email, password } = req.body;
+
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Ingresa tu correo y contraseña.' });
+  }
+
+  const user = await findUserByEmail(email);
+  if (!user) {
+    return res.status(401).json({ error: 'Correo o contraseña incorrectos.' });
+  }
+
+  const isValid = verifyPassword(password, user.password_hash);
+  if (!isValid) {
+    return res.status(401).json({ error: 'Correo o contraseña incorrectos.' });
+  }
+
+  const space = await getOrLoadSpace(user.space_id);
+  if (!space) {
+    return res.status(404).json({ error: 'No se encontró el espacio compartido vinculado a tu cuenta.' });
+  }
+
+  const token = crypto.randomUUID();
+  space.tokens = Array.isArray(space.tokens) ? space.tokens : [];
+  space.tokens.push(token);
+  saveSpaces(user.space_id);
+
+  res.json({
+    success: true,
+    message: `¡Bienvenido de nuevo, ${user.name}!`,
+    user: { id: user.id, email: user.email, name: user.name, avatar: user.avatar },
+    space: sanitizeSpace(space),
+    partnerRole: user.partner_role,
+    token
+  });
+});
 
 // S1, D7: Auth: Create a custom couple space (generates secure token & avoids ID collision)
 app.post('/api/auth/create-space', authRateLimiter, (req, res) => {
