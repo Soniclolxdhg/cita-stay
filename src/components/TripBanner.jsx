@@ -80,14 +80,15 @@ export default function TripBanner({
           <DollarSign size={15} color="#10B981" />
           <span>Moneda:</span>
           <select
-            value={currency}
+            id="trip-currency-select"
+            value={currency || 'CLP'}
             onChange={(e) => onUpdateTrip({ currency: e.target.value })}
           >
+            <option value="CLP">CLP ($)</option>
             <option value="USD">USD ($)</option>
             <option value="EUR">EUR (€)</option>
             <option value="ARS">ARS ($)</option>
             <option value="MXN">MXN ($)</option>
-            <option value="CLP">CLP ($)</option>
             <option value="COP">COP ($)</option>
           </select>
         </div>

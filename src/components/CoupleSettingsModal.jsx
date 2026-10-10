@@ -35,7 +35,11 @@ export default function CoupleSettingsModal({
   const targetPartnerAvatar = partners[targetRole === 'p2' ? 'partner2' : 'partner1']?.avatar || '💌';
 
   const baseUrl = window.location.origin + window.location.pathname;
-  const partnerShareUrl = `${baseUrl}?space=${spaceId}&partner=${targetRole}`;
+  const p1Param = encodeURIComponent(partners.partner1?.name || p1Name || '');
+  const p2Param = encodeURIComponent(partners.partner2?.name || p2Name || '');
+  const p1Av = encodeURIComponent(partners.partner1?.avatar || p1Avatar || '🌸');
+  const p2Av = encodeURIComponent(partners.partner2?.avatar || p2Avatar || '🐻');
+  const partnerShareUrl = `${baseUrl}?space=${spaceId}&partner=${targetRole}&p1=${p1Param}&p2=${p2Param}&p1a=${p1Av}&p2a=${p2Av}`;
 
   const whatsappMsg = `¡Hola mi amor! 💕 Creé nuestro nido en Cita Stay para que elijamos y votemos nuestros alojamientos juntos.\n\nToca aquí para entrar directamente como ${targetPartnerAvatar} ${targetPartnerName}:\n${partnerShareUrl}`;
   const whatsappUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(whatsappMsg)}`;

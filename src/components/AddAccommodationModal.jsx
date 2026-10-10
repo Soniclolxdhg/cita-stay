@@ -227,10 +227,10 @@ export default function AddAccommodationModal({
             </div>
 
             <div className="form-group">
-              <label className="form-label">Precio por Noche ({currency}) *</label>
+              <label className="form-label">Precio por Noche ({currency || 'USD'}) *</label>
               <input
                 type="number"
-                placeholder="Ej: 120"
+                placeholder={currency === 'CLP' ? 'Ej: 85000' : currency === 'ARS' ? 'Ej: 95000' : 'Ej: 120'}
                 value={pricePerNight}
                 onChange={(e) => setPricePerNight(e.target.value)}
                 className="form-input"

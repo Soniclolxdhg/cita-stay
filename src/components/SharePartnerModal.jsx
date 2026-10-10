@@ -31,11 +31,15 @@ export default function SharePartnerModal({
   // Base URL
   const baseUrl = window.location.origin + window.location.pathname;
 
-  // Personalized link for the other partner
-  const partnerInviteUrl = `${baseUrl}?space=${spaceId}&partner=${targetRole}`;
+  // Personalized link with names and avatars preloaded
+  const p1Param = encodeURIComponent(partners.partner1?.name || '');
+  const p2Param = encodeURIComponent(partners.partner2?.name || '');
+  const p1Avatar = encodeURIComponent(partners.partner1?.avatar || '🌸');
+  const p2Avatar = encodeURIComponent(partners.partner2?.avatar || '🐻');
+  const partnerInviteUrl = `${baseUrl}?space=${spaceId}&partner=${targetRole}&p1=${p1Param}&p2=${p2Param}&p1a=${p1Avatar}&p2a=${p2Avatar}`;
 
   // My own personal link
-  const myPersonalUrl = `${baseUrl}?space=${spaceId}&partner=${myRole}`;
+  const myPersonalUrl = `${baseUrl}?space=${spaceId}&partner=${myRole}&p1=${p1Param}&p2=${p2Param}&p1a=${p1Avatar}&p2a=${p2Avatar}`;
 
   // WhatsApp message pre-filled
   const whatsappMessage = `¡Hola mi amor! 💕 Creé nuestro nido en Cita Stay para que elijamos y votemos nuestros alojamientos juntos.\n\nToca aquí para entrar directamente como ${targetPartner.avatar} ${targetPartner.name}:\n${partnerInviteUrl}`;

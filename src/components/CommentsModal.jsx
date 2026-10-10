@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { X, Send, Trash2 } from 'lucide-react';
+import { formatCurrencyPrice } from '../utils/formatters';
 
 export default function CommentsModal({
   isOpen,
@@ -8,7 +9,8 @@ export default function CommentsModal({
   currentPartnerId,
   partners,
   onAddComment,
-  onDeleteComment
+  onDeleteComment,
+  currency
 }) {
   const [commentText, setCommentText] = useState('');
 
@@ -65,7 +67,7 @@ export default function CommentsModal({
               {item.title}
             </div>
             <div style={{ fontSize: '0.78rem', color: 'var(--rose-600)', fontWeight: 600 }}>
-              {item.currency} ${item.pricePerNight} / noche
+              {formatCurrencyPrice(item.pricePerNight, currency || item.currency || 'USD')} / noche
             </div>
           </div>
         </div>

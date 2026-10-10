@@ -12,6 +12,7 @@ import {
   Edit2
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
+import { formatCurrencyPrice } from '../utils/formatters';
 
 export default function AccommodationCard({
   item,
@@ -30,7 +31,8 @@ export default function AccommodationCard({
   const p2Reaction = item.reactions?.p2 || { liked: false, note: '' };
 
   const isMatch = Boolean(p1Reaction.liked && p2Reaction.liked);
-  const totalStayPrice = (item.pricePerNight * nights).toLocaleString();
+  const effectiveCurrency = currency || item.currency || 'USD';
+  const rawTotalPrice = (parseFloat(item.pricePerNight) || 0) * (parseInt(nights, 10) || 1);
 
   const [editingNote, setEditingNote] = useState(false);
   const [currentNote, setCurrentNote] = useState(
@@ -107,13 +109,13 @@ export default function AccommodationCard({
         <div className="price-display">
           <div>
             <div className="night-price">
-              {item.currency || currency} ${item.pricePerNight}
+              {formatCurrencyPrice(item.pricePerNight, effectiveCurrency)}
               <small> / noche</small>
             </div>
           </div>
           <div className="total-stay-price">
             Total {nights} {nights === 1 ? 'noche' : 'noches'}:
-            <strong>{item.currency || currency} ${totalStayPrice}</strong>
+            <strong>{formatCurrencyPrice(rawTotalPrice, effectiveCurrency)}</strong>
           </div>
         </div>
 

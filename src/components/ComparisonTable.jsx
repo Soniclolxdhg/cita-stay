@@ -1,5 +1,6 @@
 import React from 'react';
 import { ExternalLink, MessageCircle, Trash2, Check, MapPin } from 'lucide-react';
+import { formatCurrencyPrice } from '../utils/formatters';
 
 export default function ComparisonTable({
   items,
@@ -39,7 +40,8 @@ export default function ComparisonTable({
             const p1Liked = !!item.reactions?.p1?.liked;
             const p2Liked = !!item.reactions?.p2?.liked;
             const isMatch = p1Liked && p2Liked;
-            const total = (item.pricePerNight * nights).toLocaleString();
+            const rawTotal = (parseFloat(item.pricePerNight) || 0) * (parseInt(nights, 10) || 1);
+            const effectiveCurrency = currency || item.currency || 'USD';
 
             return (
               <tr key={item.id} className={isMatch ? 'is-match' : ''}>
@@ -87,14 +89,14 @@ export default function ComparisonTable({
                 {/* Price per night */}
                 <td>
                   <div style={{ fontWeight: 700, color: 'var(--rose-600)' }}>
-                    {item.currency || currency} ${item.pricePerNight}
+                    {formatCurrencyPrice(item.pricePerNight, effectiveCurrency)}
                   </div>
                 </td>
 
                 {/* Total price */}
                 <td>
                   <div style={{ fontWeight: 800, color: 'var(--text-primary)' }}>
-                    {item.currency || currency} ${total}
+                    {formatCurrencyPrice(rawTotal, effectiveCurrency)}
                   </div>
                 </td>
 

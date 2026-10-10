@@ -228,7 +228,7 @@ app.post('/api/auth/create-space', (req, res) => {
     pin = '',
     withExamples = false,
     nights = 3,
-    currency = 'USD'
+    currency = 'CLP'
   } = req.body;
 
   const randomDigits = Math.floor(1000 + Math.random() * 9000);
@@ -238,7 +238,7 @@ app.post('/api/auth/create-space', (req, res) => {
     id: cleanId,
     name: name.trim() || 'Nuestra Escapada Romántica 💕',
     nights: Math.max(1, parseInt(nights, 10) || 3),
-    currency: currency || 'USD',
+    currency: currency || 'CLP',
     pin: pin ? String(pin).trim() : '',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -319,7 +319,7 @@ app.post('/api/auth/google', (req, res) => {
     id: cleanId,
     name: spaceName.trim() || `Escapada de ${userDisplayName} & ${partnerDisplayName} 💕`,
     nights: 3,
-    currency: 'USD',
+    currency: 'CLP',
     pin: '',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -373,16 +373,93 @@ app.post('/api/space/:spaceId/link-google', (req, res) => {
   res.json({ success: true, space: spacesCache[cleanId] });
 });
 
+// Synchronize entire space state from client to backend cache
+app.post('/api/space/:spaceId/sync', (req, res) => {
+  const { spaceId } = req.params;
+  const cleanId = (spaceId || 'default').toUpperCase().trim();
+  const incoming = req.body;
+
+  if (!incoming || typeof incoming !== 'object') {
+    return res.status(400).json({ error: 'Payload de sincronización inválido' });
+  }
+
+  if (!spacesCache[cleanId]) {
+    loadSpaces();
+  }
+
+  const existing = spacesCache[cleanId] || {};
+
+  // Merge accommodations intelligently by id
+  const existingAccs = Array.isArray(existing.accommodations) ? existing.accommodations : [];
+  const incomingAccs = Array.isArray(incoming.accommodations) ? incoming.accommodations : [];
+
+  const accMap = new Map();
+  // Existing first
+  for (const acc of existingAccs) {
+    if (acc && acc.id) accMap.set(acc.id, acc);
+  }
+  // Incoming overrides or adds
+  for (const acc of incomingAccs) {
+    if (acc && acc.id) {
+      if (!accMap.has(acc.id)) {
+        accMap.set(acc.id, acc);
+      } else {
+        const cur = accMap.get(acc.id);
+        accMap.set(acc.id, {
+          ...cur,
+          ...acc,
+          reactions: {
+            p1: acc.reactions?.p1?.liked !== undefined ? acc.reactions.p1 : cur.reactions?.p1,
+            p2: acc.reactions?.p2?.liked !== undefined ? acc.reactions.p2 : cur.reactions?.p2
+          },
+          comments: Array.isArray(acc.comments) && acc.comments.length >= (cur.comments?.length || 0)
+            ? acc.comments
+            : (cur.comments || [])
+        });
+      }
+    }
+  }
+
+  const mergedSpace = {
+    ...existing,
+    ...incoming,
+    id: cleanId,
+    name: incoming.name || existing.name || 'Nuestra Escapada Romántica 💕',
+    nights: incoming.nights || existing.nights || 3,
+    currency: incoming.currency || existing.currency || 'CLP',
+    partners: {
+      partner1: {
+        ...(existing.partners?.partner1 || { id: 'p1', name: 'Pareja 1', avatar: '🌸', color: '#F472B6' }),
+        ...(incoming.partners?.partner1 || {})
+      },
+      partner2: {
+        ...(existing.partners?.partner2 || { id: 'p2', name: 'Pareja 2', avatar: '🐻', color: '#818CF8' }),
+        ...(incoming.partners?.partner2 || {})
+      }
+    },
+    accommodations: Array.from(accMap.values()),
+    updatedAt: new Date().toISOString()
+  };
+
+  spacesCache[cleanId] = mergedSpace;
+  saveSpaces();
+
+  res.json({ success: true, space: mergedSpace });
+});
+
 // Get space data
 app.get('/api/space/:spaceId', (req, res) => {
   const { spaceId } = req.params;
   const cleanId = (spaceId || 'default').toUpperCase().trim();
+
+  let isFreshInit = false;
 
   if (!spacesCache[cleanId]) {
     loadSpaces();
   }
 
   if (!spacesCache[cleanId]) {
+    isFreshInit = true;
     // Only load demo items for the official demo space AMOR-2026 or DEMO
     if (cleanId === 'AMOR-2026' || cleanId === 'DEMO') {
       spacesCache[cleanId] = createDefaultSpace(cleanId);
@@ -392,7 +469,7 @@ app.get('/api/space/:spaceId', (req, res) => {
         id: cleanId,
         name: 'Nuestra Escapada Romántica 💕',
         nights: 3,
-        currency: 'USD',
+        currency: 'CLP',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         partners: {
@@ -405,7 +482,12 @@ app.get('/api/space/:spaceId', (req, res) => {
     saveSpaces();
   }
 
-  res.json(spacesCache[cleanId]);
+  const spaceResponse = {
+    ...spacesCache[cleanId],
+    _isFreshInit: isFreshInit
+  };
+
+  res.json(spaceResponse);
 });
 
 // Update general space configuration (name, currency, nights, partners)
@@ -414,7 +496,23 @@ app.post('/api/space/:spaceId', (req, res) => {
   const cleanId = (spaceId || 'default').toUpperCase().trim();
 
   if (!spacesCache[cleanId]) {
-    spacesCache[cleanId] = createDefaultSpace(cleanId);
+    loadSpaces();
+  }
+
+  if (!spacesCache[cleanId]) {
+    spacesCache[cleanId] = {
+      id: cleanId,
+      name: 'Nuestra Escapada Romántica 💕',
+      nights: 3,
+      currency: 'CLP',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      partners: {
+        partner1: { id: 'p1', name: 'Pareja 1', avatar: '🌸', color: '#F472B6' },
+        partner2: { id: 'p2', name: 'Pareja 2', avatar: '🐻', color: '#818CF8' }
+      },
+      accommodations: []
+    };
   }
 
   const current = spacesCache[cleanId];
@@ -437,7 +535,23 @@ app.post('/api/space/:spaceId/accommodations', (req, res) => {
   const cleanId = (spaceId || 'default').toUpperCase().trim();
 
   if (!spacesCache[cleanId]) {
-    spacesCache[cleanId] = createDefaultSpace(cleanId);
+    loadSpaces();
+  }
+
+  if (!spacesCache[cleanId]) {
+    spacesCache[cleanId] = {
+      id: cleanId,
+      name: 'Nuestra Escapada Romántica 💕',
+      nights: 3,
+      currency: 'CLP',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      partners: {
+        partner1: { id: 'p1', name: 'Pareja 1', avatar: '🌸', color: '#F472B6' },
+        partner2: { id: 'p2', name: 'Pareja 2', avatar: '🐻', color: '#818CF8' }
+      },
+      accommodations: []
+    };
   }
 
   const current = spacesCache[cleanId];
@@ -447,7 +561,7 @@ app.post('/api/space/:spaceId/accommodations', (req, res) => {
     type: req.body.type || 'Cabaña',
     location: req.body.location || 'Zona por definir',
     pricePerNight: parseFloat(req.body.pricePerNight) || 100,
-    currency: req.body.currency || current.currency || 'USD',
+    currency: req.body.currency || current.currency || 'CLP',
     imageUrl: req.body.imageUrl || getRandomPhoto(),
     link: req.body.link || '',
     description: req.body.description || '',

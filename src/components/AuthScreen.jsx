@@ -51,7 +51,8 @@ export default function AuthScreen({
           p2Name: p2Name.trim() || 'Mi Pareja',
           p2Avatar,
           pin: pin.trim(),
-          withExamples
+          withExamples,
+          currency: 'CLP'
         })
       });
 
@@ -70,7 +71,7 @@ export default function AuthScreen({
         id: offlineId,
         name: tripName.trim() || `Escapada de ${p1Name.trim()} & ${p2Name.trim() || 'Pareja'} 💕`,
         nights: 3,
-        currency: 'USD',
+        currency: 'CLP',
         partners: {
           partner1: { id: 'p1', name: p1Name.trim(), avatar: p1Avatar, color: '#F472B6' },
           partner2: { id: 'p2', name: p2Name.trim() || 'Mi Pareja', avatar: p2Avatar, color: '#818CF8' }

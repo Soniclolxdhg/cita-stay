@@ -68,7 +68,7 @@ export default function GoogleAuthModal({
         id: offlineId,
         name: `Nido de ${displayName} & ${partnerName.trim() || 'Mi Pareja'} 💕`,
         nights: 3,
-        currency: 'USD',
+        currency: 'CLP',
         googleOwner: { email: cleanEmail, name: displayName },
         partners: {
           partner1: { id: 'p1', name: displayName, avatar: '🌸', color: '#F472B6' },

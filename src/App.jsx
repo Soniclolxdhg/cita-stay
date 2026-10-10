@@ -54,24 +54,91 @@ export default function App() {
     return localStorage.getItem('cita_gemini_key') || '';
   });
 
-  // Space data state with instant offline cache hydration
+  // Space data state with instant offline cache hydration & query param awareness
   const [spaceData, setSpaceData] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    const p1Url = params.get('p1');
+    const p2Url = params.get('p2');
+    const p1AvatarUrl = params.get('p1a');
+    const p2AvatarUrl = params.get('p2a');
+    const currUrl = params.get('curr');
+
     try {
       const cached = localStorage.getItem(`cita_cache_${spaceId}`);
-      if (cached) return JSON.parse(cached);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (p1Url && (!parsed.partners?.partner1?.name || parsed.partners.partner1.name === 'Pareja 1' || parsed.partners.partner1.name === 'Cami')) {
+          parsed.partners.partner1.name = decodeURIComponent(p1Url);
+        }
+        if (p2Url && (!parsed.partners?.partner2?.name || parsed.partners.partner2.name === 'Pareja 2' || parsed.partners.partner2.name === 'Nico')) {
+          parsed.partners.partner2.name = decodeURIComponent(p2Url);
+        }
+        if (currUrl && (!parsed.currency || parsed.currency === 'USD')) {
+          parsed.currency = decodeURIComponent(currUrl);
+        }
+        return parsed;
+      }
     } catch (_) {}
+
     return {
       id: spaceId,
       name: 'Nuestra Escapada Romántica 💕',
       nights: 3,
-      currency: 'USD',
+      currency: currUrl ? decodeURIComponent(currUrl) : 'CLP',
       partners: {
-        partner1: { id: 'p1', name: 'Pareja 1', avatar: '🌸', color: '#F472B6' },
-        partner2: { id: 'p2', name: 'Pareja 2', avatar: '🐻', color: '#818CF8' }
+        partner1: { id: 'p1', name: p1Url ? decodeURIComponent(p1Url) : 'Pareja 1', avatar: p1AvatarUrl ? decodeURIComponent(p1AvatarUrl) : '🌸', color: '#F472B6' },
+        partner2: { id: 'p2', name: p2Url ? decodeURIComponent(p2Url) : 'Pareja 2', avatar: p2AvatarUrl ? decodeURIComponent(p2AvatarUrl) : '🐻', color: '#818CF8' }
       },
       accommodations: []
     };
   });
+
+  // Tombstones for intentionally deleted accommodations to avoid resurrection
+  const [deletedAccIds, setDeletedAccIds] = useState(() => {
+    try {
+      const saved = localStorage.getItem(`cita_deleted_${spaceId}`);
+      return saved ? JSON.parse(saved) : [];
+    } catch (_) {
+      return [];
+    }
+  });
+
+  const markAccDeleted = (accId) => {
+    setDeletedAccIds((prev) => {
+      const next = [...prev, accId];
+      try {
+        localStorage.setItem(`cita_deleted_${spaceId}`, JSON.stringify(next));
+      } catch (_) {}
+      return next;
+    });
+  };
+
+  // Helper to synchronously update React state, localStorage cache, and optionally sync to backend
+  const updateSpaceData = (updater, shouldSync = false) => {
+    setSpaceData((prev) => {
+      const next = typeof updater === 'function' ? updater(prev) : { ...prev, ...updater };
+      try {
+        localStorage.setItem(`cita_cache_${next.id || spaceId}`, JSON.stringify(next));
+      } catch (_) {}
+      if (shouldSync) {
+        syncSpaceToServer(next);
+      }
+      return next;
+    });
+  };
+
+  // Push complete local state to server cache
+  const syncSpaceToServer = async (payload) => {
+    try {
+      await fetch(`/api/space/${spaceId}/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+    } catch (err) {
+      console.warn('Sync to backend failed (will retry):', err);
+    }
+  };
 
   const [loading, setLoading] = useState(false);
 
@@ -130,30 +197,122 @@ export default function App() {
     handleLoginSuccess('AMOR-2026', 'p1');
   };
 
-  // Fetch space data from backend with instant cache fallback
+  // Fetch space data from backend with smart merging and anti-wipe protection
   const loadSpaceData = useCallback(async (isInitial = false) => {
     try {
       if (isInitial && spaceData.accommodations.length === 0) setLoading(true);
       const res = await fetch(`/api/space/${spaceId}`);
       if (res.ok) {
-        const data = await res.json();
-        setSpaceData(data);
-        try {
-          localStorage.setItem(`cita_cache_${spaceId}`, JSON.stringify(data));
-        } catch (_) {}
+        const serverData = await res.json();
+        
+        setSpaceData((localData) => {
+          if (!serverData || !serverData.id) return localData;
+
+          const deletedSet = new Set(deletedAccIds);
+
+          // 1. Partner names merge: NEVER overwrite custom names with generic ones
+          const isGeneric = (n, def) => !n || n === 'Pareja 1' || n === 'Pareja 2' || n === 'Cami' || n === 'Nico' || n === def;
+          
+          const localP1 = localData.partners?.partner1?.name;
+          const serverP1 = serverData.partners?.partner1?.name;
+          const finalP1 = !isGeneric(localP1, 'Pareja 1')
+            ? localP1
+            : (!isGeneric(serverP1, 'Pareja 1') ? serverP1 : (localP1 || serverP1 || 'Pareja 1'));
+
+          const localP2 = localData.partners?.partner2?.name;
+          const serverP2 = serverData.partners?.partner2?.name;
+          const finalP2 = !isGeneric(localP2, 'Pareja 2')
+            ? localP2
+            : (!isGeneric(serverP2, 'Pareja 2') ? serverP2 : (localP2 || serverP2 || 'Pareja 2'));
+
+          const mergedPartners = {
+            partner1: {
+              ...(serverData.partners?.partner1 || {}),
+              ...(localData.partners?.partner1 || {}),
+              name: finalP1,
+              avatar: localData.partners?.partner1?.avatar || serverData.partners?.partner1?.avatar || '🌸',
+              color: localData.partners?.partner1?.color || serverData.partners?.partner1?.color || '#F472B6'
+            },
+            partner2: {
+              ...(serverData.partners?.partner2 || {}),
+              ...(localData.partners?.partner2 || {}),
+              name: finalP2,
+              avatar: localData.partners?.partner2?.avatar || serverData.partners?.partner2?.avatar || '🐻',
+              color: localData.partners?.partner2?.color || serverData.partners?.partner2?.color || '#818CF8'
+            }
+          };
+
+          // 2. Accommodations Union Merge (Never drop local items!)
+          const serverAccs = Array.isArray(serverData.accommodations) ? serverData.accommodations : [];
+          const localAccs = Array.isArray(localData.accommodations) ? localData.accommodations : [];
+
+          const accMap = new Map();
+
+          // Local items first
+          for (const acc of localAccs) {
+            if (acc && acc.id && !deletedSet.has(acc.id)) {
+              accMap.set(acc.id, acc);
+            }
+          }
+
+          // Server items merged
+          for (const sAcc of serverAccs) {
+            if (!sAcc || !sAcc.id || deletedSet.has(sAcc.id)) continue;
+            if (!accMap.has(sAcc.id)) {
+              accMap.set(sAcc.id, sAcc);
+            } else {
+              const lAcc = accMap.get(sAcc.id);
+              accMap.set(sAcc.id, {
+                ...lAcc,
+                ...sAcc,
+                reactions: {
+                  p1: sAcc.reactions?.p1?.liked !== undefined ? sAcc.reactions.p1 : lAcc.reactions?.p1,
+                  p2: sAcc.reactions?.p2?.liked !== undefined ? sAcc.reactions.p2 : lAcc.reactions?.p2
+                },
+                comments: (sAcc.comments?.length || 0) >= (lAcc.comments?.length || 0)
+                  ? sAcc.comments
+                  : (lAcc.comments || [])
+              });
+            }
+          }
+
+          const mergedAccs = Array.from(accMap.values());
+
+          const mergedName = (localData.name && localData.name !== 'Nuestra Escapada Romántica 💕')
+            ? localData.name
+            : (serverData.name || localData.name || 'Nuestra Escapada Romántica 💕');
+
+          const mergedCurrency = localData.currency || serverData.currency || 'CLP';
+          const mergedNights = localData.nights || serverData.nights || 3;
+
+          const mergedState = {
+            ...serverData,
+            id: spaceId,
+            name: mergedName,
+            nights: mergedNights,
+            currency: mergedCurrency,
+            partners: mergedPartners,
+            accommodations: mergedAccs
+          };
+
+          try {
+            localStorage.setItem(`cita_cache_${spaceId}`, JSON.stringify(mergedState));
+          } catch (_) {}
+
+          // If server was freshly initialized or missing items that exist locally, re-hydrate server immediately!
+          if (serverData._isFreshInit || localAccs.length > serverAccs.length) {
+            syncSpaceToServer(mergedState);
+          }
+
+          return mergedState;
+        });
       }
     } catch (err) {
-      console.warn('Could not sync with backend, using cached state:', err);
-      try {
-        const cached = localStorage.getItem(`cita_cache_${spaceId}`);
-        if (cached) {
-          setSpaceData(JSON.parse(cached));
-        }
-      } catch (_) {}
+      console.warn('Backend sync poll failed, offline cache active:', err);
     } finally {
       if (isInitial) setLoading(false);
     }
-  }, [spaceId, spaceData.accommodations.length]);
+  }, [spaceId, deletedAccIds]);
 
   // Initial load + Real-time synchronization polling (every 4 seconds)
   useEffect(() => {
@@ -174,22 +333,17 @@ export default function App() {
     showToast(`Ahora estás interactuando como ${partnerName} ✨`);
   };
 
-  const handleUpdateTrip = async (updates) => {
-    // Optimistic update
-    setSpaceData((prev) => ({
+  const handleUpdateTrip = (updates) => {
+    updateSpaceData((prev) => ({
       ...prev,
       ...updates
-    }));
+    }), true);
 
-    try {
-      await fetch(`/api/space/${spaceId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updates)
-      });
-    } catch (err) {
-      console.error('Error updating trip config:', err);
-    }
+    fetch(`/api/space/${spaceId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates)
+    }).catch(() => {});
   };
 
   const handleUpdateApiKey = (key) => {
@@ -212,7 +366,7 @@ export default function App() {
       if (res.ok) {
         const data = await res.json();
         if (data.space) {
-          setSpaceData(data.space);
+          updateSpaceData(data.space, true);
           showToast(`¡Espacio vinculado a Google (${googleData.email})! 🔐💕`);
         }
       }
@@ -221,32 +375,41 @@ export default function App() {
     }
   };
 
-  // Add accommodation
+  // Add accommodation (instant optimistic UI + local-first persistence)
   const handleAddAccommodation = async (newAcc) => {
+    const fullItem = {
+      id: newAcc.id || 'acc_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+      ...newAcc,
+      currency: newAcc.currency || spaceData.currency || 'CLP',
+      createdAt: new Date().toISOString(),
+      reactions: newAcc.reactions || {
+        p1: { liked: true, reaction: 'love', note: '' },
+        p2: { liked: false, reaction: null, note: '' }
+      },
+      comments: newAcc.comments || []
+    };
+
+    updateSpaceData((prev) => ({
+      ...prev,
+      accommodations: [fullItem, ...prev.accommodations.filter((a) => a.id !== fullItem.id)]
+    }), true);
+
+    showToast('¡Alojamiento agregado a la lista! 💕');
+
     try {
-      const res = await fetch(`/api/space/${spaceId}/accommodations`, {
+      await fetch(`/api/space/${spaceId}/accommodations`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newAcc)
+        body: JSON.stringify(fullItem)
       });
-
-      if (res.ok) {
-        const added = await res.json();
-        setSpaceData((prev) => ({
-          ...prev,
-          accommodations: [added, ...prev.accommodations]
-        }));
-        showToast('¡Alojamiento agregado a la lista! 💕');
-      }
     } catch (err) {
-      console.error('Error adding accommodation:', err);
+      console.warn('Network issue adding accommodation, saved offline and queued sync:', err);
     }
   };
 
   // Toggle reaction (Heart / Note)
   const handleToggleReaction = async (accId, reactionPayload) => {
-    // Optimistic update
-    setSpaceData((prev) => {
+    updateSpaceData((prev) => {
       const nextAccs = prev.accommodations.map((a) => {
         if (a.id === accId) {
           const currentP1 = a.reactions?.p1 || { liked: false, note: '' };
@@ -258,15 +421,12 @@ export default function App() {
             p2: pKey === 'p2' ? { ...currentP2, ...reactionPayload } : currentP2
           };
 
-          return {
-            ...a,
-            reactions: updatedReactions
-          };
+          return { ...a, reactions: updatedReactions };
         }
         return a;
       });
       return { ...prev, accommodations: nextAccs };
-    });
+    }, true);
 
     try {
       const res = await fetch(`/api/space/${spaceId}/accommodations/${accId}/reaction`, {
@@ -287,7 +447,7 @@ export default function App() {
         }
       }
     } catch (err) {
-      console.error('Error saving reaction:', err);
+      console.warn('Error saving reaction online, saved locally:', err);
     }
   };
 
@@ -295,54 +455,60 @@ export default function App() {
   const handleDeleteAccommodation = async (accId) => {
     if (!window.confirm('¿Seguro que quieren eliminar este alojamiento de su lista?')) return;
 
-    setSpaceData((prev) => ({
+    markAccDeleted(accId);
+
+    updateSpaceData((prev) => ({
       ...prev,
       accommodations: prev.accommodations.filter((a) => a.id !== accId)
-    }));
+    }), true);
+
+    showToast('Alojamiento eliminado');
 
     try {
       await fetch(`/api/space/${spaceId}/accommodations/${accId}`, {
         method: 'DELETE'
       });
-      showToast('Alojamiento eliminado');
     } catch (err) {
-      console.error('Error deleting:', err);
+      console.warn('Error deleting on server:', err);
     }
   };
 
   // Add Comment
   const handleAddComment = async (accId, commentPayload) => {
+    const newComment = {
+      id: 'c_' + Date.now() + '_' + Math.random().toString(36).substring(2, 5),
+      ...commentPayload,
+      createdAt: new Date().toISOString()
+    };
+
+    updateSpaceData((prev) => {
+      const nextAccs = prev.accommodations.map((a) => {
+        if (a.id === accId) {
+          const updatedComments = [...(a.comments || []), newComment];
+          if (activeCommentItem && activeCommentItem.id === accId) {
+            setActiveCommentItem({ ...a, comments: updatedComments });
+          }
+          return { ...a, comments: updatedComments };
+        }
+        return a;
+      });
+      return { ...prev, accommodations: nextAccs };
+    }, true);
+
     try {
-      const res = await fetch(`/api/space/${spaceId}/accommodations/${accId}/comment`, {
+      await fetch(`/api/space/${spaceId}/accommodations/${accId}/comment`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(commentPayload)
+        body: JSON.stringify(newComment)
       });
-
-      if (res.ok) {
-        const newComment = await res.json();
-        setSpaceData((prev) => {
-          const nextAccs = prev.accommodations.map((a) => {
-            if (a.id === accId) {
-              const updatedComments = [...(a.comments || []), newComment];
-              if (activeCommentItem && activeCommentItem.id === accId) {
-                setActiveCommentItem({ ...a, comments: updatedComments });
-              }
-              return { ...a, comments: updatedComments };
-            }
-            return a;
-          });
-          return { ...prev, accommodations: nextAccs };
-        });
-      }
     } catch (err) {
-      console.error('Error adding comment:', err);
+      console.warn('Error adding comment online, saved locally:', err);
     }
   };
 
   // Delete Comment
   const handleDeleteComment = async (accId, commentId) => {
-    setSpaceData((prev) => {
+    updateSpaceData((prev) => {
       const nextAccs = prev.accommodations.map((a) => {
         if (a.id === accId) {
           const updatedComments = (a.comments || []).filter((c) => c.id !== commentId);
@@ -354,14 +520,14 @@ export default function App() {
         return a;
       });
       return { ...prev, accommodations: nextAccs };
-    });
+    }, true);
 
     try {
       await fetch(`/api/space/${spaceId}/accommodations/${accId}/comment/${commentId}`, {
         method: 'DELETE'
       });
     } catch (err) {
-      console.error('Error deleting comment:', err);
+      console.warn('Error deleting comment online, saved locally:', err);
     }
   };
 
@@ -584,6 +750,7 @@ export default function App() {
         partners={spaceData.partners}
         onAddComment={handleAddComment}
         onDeleteComment={handleDeleteComment}
+        currency={spaceData.currency}
       />
 
       {/* Mutual Match / Toast alert */}
