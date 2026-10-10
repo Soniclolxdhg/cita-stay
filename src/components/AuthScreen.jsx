@@ -84,22 +84,53 @@ export default function AuthScreen({
     }
   };
 
+  // Find any previously created/visited spaces on this device
+  const savedSpaces = React.useMemo(() => {
+    const list = [];
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith('cita_cache_')) {
+          const raw = localStorage.getItem(key);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (parsed && parsed.id && parsed.id !== 'AMOR-2026') {
+              if (!list.some((item) => item.id === parsed.id)) {
+                list.push(parsed);
+              }
+            }
+          }
+        }
+      }
+    } catch (_) {}
+    return list;
+  }, []);
+
   const handleJoin = async (e) => {
     e.preventDefault();
     if (!joinCode.trim()) {
-      setError('Ingresa el código del nido que te compartió tu pareja');
+      setError('Ingresa el código de tu nido (ej: AMOR-2026)');
       return;
     }
 
     setLoading(true);
     setError('');
 
+    const cleanCode = joinCode.trim().toUpperCase();
+
+    // 1. Check local cache first so device memory is prioritized
+    let localData = null;
+    try {
+      const cached = localStorage.getItem(`cita_cache_${cleanCode}`);
+      if (cached) localData = JSON.parse(cached);
+    } catch (_) {}
+
     try {
       const res = await fetch('/api/auth/join-space', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          spaceId: joinCode.trim(),
+          spaceId: cleanCode,
           pin: joinPin.trim(),
           partnerChoice: joinPartner
         })
@@ -107,16 +138,36 @@ export default function AuthScreen({
 
       const data = await res.json();
       if (data.success && data.space) {
-        onLoginSuccess(data.space.id, joinPartner, data.space);
-      } else {
-        setError(data.error || 'Código incorrecto o espacio no encontrado');
+        // If local copy has more accommodations, prefer local
+        const finalSpace = (localData && (localData.accommodations?.length || 0) > (data.space.accommodations?.length || 0))
+          ? localData
+          : data.space;
+        onLoginSuccess(finalSpace.id, joinPartner, finalSpace);
+        return;
       }
     } catch (err) {
-      // Offline fallback
-      onLoginSuccess(joinCode.trim().toUpperCase(), joinPartner);
-    } finally {
-      setLoading(false);
+      console.warn('Network issue during join:', err);
     }
+
+    // 2. If server was idle/fresh but we have it locally, log in immediately!
+    if (localData) {
+      onLoginSuccess(cleanCode, joinPartner, localData);
+      return;
+    }
+
+    // 3. Fallback: connect to this code so user is never locked out
+    const fallbackSpace = {
+      id: cleanCode,
+      name: `Nido ${cleanCode} 💕`,
+      nights: 3,
+      currency: 'CLP',
+      partners: {
+        partner1: { id: 'p1', name: 'Pareja 1', avatar: '🌸', color: '#F472B6' },
+        partner2: { id: 'p2', name: 'Pareja 2', avatar: '🐻', color: '#818CF8' }
+      },
+      accommodations: []
+    };
+    onLoginSuccess(cleanCode, joinPartner, fallbackSpace);
   };
 
   return (
@@ -131,6 +182,57 @@ export default function AuthScreen({
             El comparador romántico y privado para viajar de a dos
           </p>
         </div>
+
+        {/* Saved Spaces on this device */}
+        {savedSpaces.length > 0 && (
+          <div style={{
+            background: 'linear-gradient(135deg, rgba(254, 242, 242, 0.95), rgba(250, 245, 255, 0.95))',
+            border: '2px solid var(--rose-200)',
+            borderRadius: 'var(--radius-lg)',
+            padding: '1rem',
+            marginBottom: '1.25rem',
+            textAlign: 'left'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontWeight: 700, fontSize: '0.85rem', color: 'var(--rose-600)', marginBottom: '0.65rem' }}>
+              <Sparkles size={15} />
+              <span>Tus Nidos Guardados en este dispositivo:</span>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              {savedSpaces.map((s) => (
+                <div key={s.id} style={{
+                  background: 'white',
+                  borderRadius: 'var(--radius-md)',
+                  padding: '0.75rem 0.85rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  boxShadow: 'var(--shadow-subtle)',
+                  border: '1px solid var(--rose-100)',
+                  gap: '0.5rem'
+                }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, fontSize: '0.88rem', color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {s.name || 'Nuestra Escapada'}
+                    </div>
+                    <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', marginTop: '0.1rem' }}>
+                      Código: <strong style={{ color: 'var(--rose-600)' }}>{s.id}</strong> • {s.accommodations?.length || 0} lugares • {s.partners?.partner1?.name || 'Pareja 1'} & {s.partners?.partner2?.name || 'Pareja 2'}
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    onClick={() => onLoginSuccess(s.id, 'p1', s)}
+                    style={{ whiteSpace: 'nowrap', flexShrink: 0, padding: '0.35rem 0.75rem', fontSize: '0.8rem' }}
+                  >
+                    Entrar 💕
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Google One-Click Login Button */}
         <button
@@ -149,7 +251,7 @@ export default function AuthScreen({
         </button>
 
         <div className="auth-divider">
-          <span>o crear con código privado</span>
+          <span>o acceder con código privado</span>
         </div>
 
         {/* Tab switch */}
@@ -159,14 +261,14 @@ export default function AuthScreen({
             className={`auth-tab-btn ${mode === 'create' ? 'active' : ''}`}
             onClick={() => { setMode('create'); setError(''); }}
           >
-            Crear Nuestro Nido
+            Crear Nuevo Nido
           </button>
           <button
             type="button"
             className={`auth-tab-btn ${mode === 'join' ? 'active' : ''}`}
             onClick={() => { setMode('join'); setError(''); }}
           >
-            Tengo un Código / Unirme
+            Ya Tengo un Código / Iniciar Sesión
           </button>
         </div>
 
@@ -291,7 +393,7 @@ export default function AuthScreen({
         {mode === 'join' && (
           <form onSubmit={handleJoin} className="auth-form">
             <p style={{ fontSize: '0.88rem', color: 'var(--text-secondary)', marginBottom: '1.25rem' }}>
-              Pídele a tu pareja el <strong>Código de Nido</strong> (ej: <code>AMOR-7429</code>) o abre el link directo que te envió por WhatsApp.
+              Ingresa el <strong>Código de tu Nido</strong> (ej: <code>AMOR-7429</code>) para reanudar tu sesión o sincronizarte con tu pareja.
             </p>
 
             <div className="form-group">
@@ -347,7 +449,7 @@ export default function AuthScreen({
               style={{ marginTop: '1rem', width: '100%', padding: '0.85rem' }}
             >
               <ArrowRight size={16} />
-              <span>{loading ? 'Verificando...' : 'Unirme a Nuestro Espacio 💕'}</span>
+              <span>{loading ? 'Accediendo...' : 'Iniciar Sesión / Entrar a Nuestro Espacio 💕'}</span>
             </button>
           </form>
         )}

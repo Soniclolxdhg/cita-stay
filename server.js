@@ -51,6 +51,44 @@ function getRandomPhoto() {
 // In-memory cache + file storage helper
 let spacesCache = {};
 
+// Permanent Cloud KV Integration (Upstash Redis / Vercel KV via REST)
+const KV_URL = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
+const KV_TOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
+
+async function getSpaceFromCloud(spaceId) {
+  if (!KV_URL || !KV_TOKEN) return null;
+  try {
+    const res = await fetch(`${KV_URL}/get/cita_space_${spaceId}`, {
+      headers: { Authorization: `Bearer ${KV_TOKEN}` }
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.result) {
+        return typeof data.result === 'string' ? JSON.parse(data.result) : data.result;
+      }
+    }
+  } catch (err) {
+    console.warn('Cloud KV read error:', err.message);
+  }
+  return null;
+}
+
+async function saveSpaceToCloud(spaceId, spaceData) {
+  if (!KV_URL || !KV_TOKEN) return;
+  try {
+    await fetch(`${KV_URL}/set/cita_space_${spaceId}`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${KV_TOKEN}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(JSON.stringify(spaceData))
+    });
+  } catch (err) {
+    console.warn('Cloud KV write error:', err.message);
+  }
+}
+
 function loadSpaces() {
   try {
     if (fs.existsSync(DB_FILE)) {
@@ -66,7 +104,7 @@ function loadSpaces() {
   }
 }
 
-function saveSpaces() {
+function saveSpaces(spaceIdToCloud = null) {
   try {
     if (!fs.existsSync(DATA_DIR)) {
       fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -74,6 +112,17 @@ function saveSpaces() {
     fs.writeFileSync(DB_FILE, JSON.stringify(spacesCache, null, 2), 'utf-8');
   } catch (err) {
     console.error('Error saving spaces to disk:', err.message);
+  }
+
+  // Also sync to cloud KV if configured
+  if (KV_URL && KV_TOKEN) {
+    if (spaceIdToCloud && spacesCache[spaceIdToCloud]) {
+      saveSpaceToCloud(spaceIdToCloud, spacesCache[spaceIdToCloud]);
+    } else {
+      for (const id of Object.keys(spacesCache)) {
+        saveSpaceToCloud(id, spacesCache[id]);
+      }
+    }
   }
 }
 
@@ -255,8 +304,8 @@ app.post('/api/auth/create-space', (req, res) => {
   res.status(201).json({ success: true, space: newSpace });
 });
 
-// Auth: Join an existing couple space
-app.post('/api/auth/join-space', (req, res) => {
+// Auth: Join an existing couple space (or resume/reconnect)
+app.post('/api/auth/join-space', async (req, res) => {
   const { spaceId, pin = '', partnerChoice = '' } = req.body;
   const cleanId = (spaceId || '').toUpperCase().trim();
 
@@ -268,8 +317,28 @@ app.post('/api/auth/join-space', (req, res) => {
     loadSpaces();
   }
 
+  // Check cloud KV if available
+  if (!spacesCache[cleanId] && KV_URL && KV_TOKEN) {
+    const fromCloud = await getSpaceFromCloud(cleanId);
+    if (fromCloud) spacesCache[cleanId] = fromCloud;
+  }
+
+  // If still not found in server cache, create and allow connection so the couple can re-hydrate and never be locked out!
   if (!spacesCache[cleanId]) {
-    return res.status(404).json({ error: `No encontramos ningún nido con el código "${cleanId}". Revisa si lo escribiste bien.` });
+    spacesCache[cleanId] = {
+      id: cleanId,
+      name: `Nido ${cleanId} 💕`,
+      nights: 3,
+      currency: 'CLP',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      partners: {
+        partner1: { id: 'p1', name: 'Pareja 1', avatar: '🌸', color: '#F472B6' },
+        partner2: { id: 'p2', name: 'Pareja 2', avatar: '🐻', color: '#818CF8' }
+      },
+      accommodations: []
+    };
+    saveSpaces();
   }
 
   const space = spacesCache[cleanId];
@@ -442,13 +511,13 @@ app.post('/api/space/:spaceId/sync', (req, res) => {
   };
 
   spacesCache[cleanId] = mergedSpace;
-  saveSpaces();
+  saveSpaces(cleanId);
 
   res.json({ success: true, space: mergedSpace });
 });
 
 // Get space data
-app.get('/api/space/:spaceId', (req, res) => {
+app.get('/api/space/:spaceId', async (req, res) => {
   const { spaceId } = req.params;
   const cleanId = (spaceId || 'default').toUpperCase().trim();
 
@@ -456,6 +525,12 @@ app.get('/api/space/:spaceId', (req, res) => {
 
   if (!spacesCache[cleanId]) {
     loadSpaces();
+  }
+
+  // Check cloud KV if available
+  if (!spacesCache[cleanId] && KV_URL && KV_TOKEN) {
+    const fromCloud = await getSpaceFromCloud(cleanId);
+    if (fromCloud) spacesCache[cleanId] = fromCloud;
   }
 
   if (!spacesCache[cleanId]) {
