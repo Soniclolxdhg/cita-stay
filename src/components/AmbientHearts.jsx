@@ -7,7 +7,7 @@ export default function AmbientHearts() {
     return Array.from({ length: 14 }).map((_, i) => ({
       id: i,
       icon: ICONS[i % ICONS.length],
-      left: `${(i * 7.5 + Math.random() * 5) % 96}%`,
+      left: `${(i * 7.5 + ((i * 13) % 5)) % 96}%`,
       delay: `${(i * 1.6).toFixed(1)}s`,
       duration: `${14 + (i % 5) * 2}s`,
       size: `${0.9 + (i % 4) * 0.3}rem`,

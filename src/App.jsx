@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import AmbientHearts from './components/AmbientHearts';
 import Header from './components/Header';
 import TripBanner from './components/TripBanner';
@@ -12,114 +12,111 @@ import CommentsModal from './components/CommentsModal';
 import MobileBottomNav from './components/MobileBottomNav';
 import AuthScreen from './components/AuthScreen';
 import SharePartnerModal from './components/SharePartnerModal';
-import { Plus, Sparkles, Heart } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
 export default function App() {
-  // Determine Space ID from URL param ?space=XYZ or localStorage
+  // Determine Space ID purely from URL param ?space=XYZ or localStorage without side-effects (Fixes Q5)
   const [spaceId, setSpaceId] = useState(() => {
     const params = new URLSearchParams(window.location.search);
     const fromUrl = params.get('space');
     if (fromUrl) {
       return fromUrl.toUpperCase().trim();
     }
-    const saved = localStorage.getItem('cita_space_id');
-    return saved || 'AMOR-2026';
+    return localStorage.getItem('cita_space_id') || 'AMOR-2026';
   });
 
-  // Partner identity for this device (p1 or p2) - automatically reads from invite link!
+  // Partner identity for this device (p1 or p2) without side-effects (Fixes Q5)
   const [currentPartnerId, setCurrentPartnerId] = useState(() => {
     const params = new URLSearchParams(window.location.search);
     const partnerFromUrl = params.get('partner') || params.get('join');
     if (partnerFromUrl === 'p2' || partnerFromUrl === 'p1') {
-      localStorage.setItem('cita_partner_id', partnerFromUrl);
       return partnerFromUrl;
     }
     return localStorage.getItem('cita_partner_id') || 'p1';
   });
 
-  // Authentication state - automatically authenticates if opening personalized invite link!
+  // S1, S2: Authentication state (Does NOT blindly authenticate if PIN is required)
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
     const params = new URLSearchParams(window.location.search);
-    if (params.get('space') && (params.get('partner') || params.get('join'))) {
-      localStorage.setItem('cita_authenticated', 'true');
-      localStorage.setItem('cita_space_id', params.get('space').toUpperCase().trim());
+    const requestedSpace = (params.get('space') || '').toUpperCase().trim();
+
+    // If demo space, auto-authenticate
+    if (requestedSpace === 'AMOR-2026' || (!requestedSpace && localStorage.getItem('cita_space_id') === 'AMOR-2026')) {
       return true;
     }
-    return localStorage.getItem('cita_authenticated') === 'true';
+
+    // Check if device already holds an authenticated session token for this space
+    const targetSpace = requestedSpace || localStorage.getItem('cita_space_id');
+    if (targetSpace && localStorage.getItem(`cita_token_${targetSpace}`)) {
+      return true;
+    }
+
+    return localStorage.getItem('cita_authenticated') === 'true' && Boolean(localStorage.getItem('cita_space_id'));
   });
 
-  // Custom Gemini API Key (optional)
-  const [apiKey, setApiKey] = useState(() => {
-    return localStorage.getItem('cita_gemini_key') || '';
-  });
+  // Persist session metadata safely in useEffect (Fixes Q5)
+  useEffect(() => {
+    if (spaceId) {
+      localStorage.setItem('cita_space_id', spaceId);
+    }
+    if (currentPartnerId) {
+      localStorage.setItem('cita_partner_id', currentPartnerId);
+    }
+    if (isAuthenticated) {
+      localStorage.setItem('cita_authenticated', 'true');
+    }
+  }, [spaceId, currentPartnerId, isAuthenticated]);
 
-  // Space data state with instant offline cache hydration & query param awareness
+  // Space data state with instant offline cache hydration
   const [spaceData, setSpaceData] = useState(() => {
-    const params = new URLSearchParams(window.location.search);
-    const p1Url = params.get('p1');
-    const p2Url = params.get('p2');
-    const p1AvatarUrl = params.get('p1a');
-    const p2AvatarUrl = params.get('p2a');
-    const currUrl = params.get('curr');
-
     try {
       const cached = localStorage.getItem(`cita_cache_${spaceId}`);
       if (cached) {
-        const parsed = JSON.parse(cached);
-        if (p1Url && (!parsed.partners?.partner1?.name || parsed.partners.partner1.name === 'Pareja 1' || parsed.partners.partner1.name === 'Cami')) {
-          parsed.partners.partner1.name = decodeURIComponent(p1Url);
-        }
-        if (p2Url && (!parsed.partners?.partner2?.name || parsed.partners.partner2.name === 'Pareja 2' || parsed.partners.partner2.name === 'Nico')) {
-          parsed.partners.partner2.name = decodeURIComponent(p2Url);
-        }
-        if (currUrl && (!parsed.currency || parsed.currency === 'USD')) {
-          parsed.currency = decodeURIComponent(currUrl);
-        }
-        return parsed;
+        return JSON.parse(cached);
       }
-    } catch (_) {}
+    } catch {}
 
     return {
       id: spaceId,
       name: 'Nuestra Escapada Romántica 💕',
       nights: 3,
-      currency: currUrl ? decodeURIComponent(currUrl) : 'CLP',
+      currency: 'CLP',
       partners: {
-        partner1: { id: 'p1', name: p1Url ? decodeURIComponent(p1Url) : 'Pareja 1', avatar: p1AvatarUrl ? decodeURIComponent(p1AvatarUrl) : '🌸', color: '#F472B6' },
-        partner2: { id: 'p2', name: p2Url ? decodeURIComponent(p2Url) : 'Pareja 2', avatar: p2AvatarUrl ? decodeURIComponent(p2AvatarUrl) : '🐻', color: '#818CF8' }
+        partner1: { id: 'p1', name: 'Pareja 1', avatar: '🌸', color: '#F472B6' },
+        partner2: { id: 'p2', name: 'Pareja 2', avatar: '🐻', color: '#818CF8' }
       },
       accommodations: []
     };
   });
 
-  // Tombstones for intentionally deleted accommodations to avoid resurrection
+  // Tombstones for intentionally deleted accommodations (Fixes D1)
   const [deletedAccIds, setDeletedAccIds] = useState(() => {
     try {
       const saved = localStorage.getItem(`cita_deleted_${spaceId}`);
       return saved ? JSON.parse(saved) : [];
-    } catch (_) {
+    } catch {
       return [];
     }
   });
 
   const markAccDeleted = (accId) => {
     setDeletedAccIds((prev) => {
-      const next = [...prev, accId];
+      const next = prev.includes(accId) ? prev : [...prev, accId];
       try {
         localStorage.setItem(`cita_deleted_${spaceId}`, JSON.stringify(next));
-      } catch (_) {}
+      } catch {}
       return next;
     });
   };
 
-  // Helper to synchronously update React state, localStorage cache, and optionally sync to backend
+  // Helper to synchronously update React state and cache
   const updateSpaceData = (updater, shouldSync = false) => {
     setSpaceData((prev) => {
       const next = typeof updater === 'function' ? updater(prev) : { ...prev, ...updater };
       try {
         localStorage.setItem(`cita_cache_${next.id || spaceId}`, JSON.stringify(next));
-      } catch (_) {}
+      } catch {}
       if (shouldSync) {
         syncSpaceToServer(next);
       }
@@ -127,16 +124,23 @@ export default function App() {
     });
   };
 
-  // Push complete local state to server cache
+  // Push local state to server cache
   const syncSpaceToServer = async (payload) => {
     try {
+      const token = localStorage.getItem(`cita_token_${spaceId}`);
       await fetch(`/api/space/${spaceId}/sync`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({
+          ...payload,
+          deletedAccIds
+        })
       });
     } catch (err) {
-      console.warn('Sync to backend failed (will retry):', err);
+      console.warn('Sync to backend failed:', err);
     }
   };
 
@@ -147,20 +151,33 @@ export default function App() {
   const [sortBy, setSortBy] = useState('featured');
   const [viewMode, setViewMode] = useState('grid');
 
-  // Modals
+  // Modals & Editing
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [editingAccommodation, setEditingAccommodation] = useState(null); // U5: Edit mode
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [activeCommentItem, setActiveCommentItem] = useState(null);
 
-  // Toast notification
+  // Q4: Toast notification with timer cleanup
   const [toastMessage, setToastMessage] = useState('');
+  const toastTimerRef = useRef(null);
 
-  const showToast = (msg) => {
+  const showToast = useCallback((msg) => {
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current);
+    }
     setToastMessage(msg);
-    setTimeout(() => setToastMessage(''), 3500);
-  };
+    toastTimerRef.current = setTimeout(() => {
+      setToastMessage('');
+    }, 3500);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    };
+  }, []);
 
   // Login handler
   const handleLoginSuccess = (newSpaceId, partnerId, initialData) => {
@@ -174,15 +191,12 @@ export default function App() {
       setSpaceData(initialData);
       try {
         localStorage.setItem(`cita_cache_${newSpaceId}`, JSON.stringify(initialData));
-      } catch (_) {}
-      if (initialData.googleOwner) {
-        localStorage.setItem('cita_google_user', JSON.stringify(initialData.googleOwner));
-      }
+      } catch {}
     }
     const newUrl = window.location.pathname + '?space=' + newSpaceId;
     window.history.pushState({ path: newUrl }, '', newUrl);
 
-    // If Partner 1 just created the space, open the invite modal immediately so they can send the WhatsApp link!
+    // If Partner 1 created the space, open invite modal immediately
     if (partnerId === 'p1') {
       setTimeout(() => setIsShareModalOpen(true), 400);
     }
@@ -191,16 +205,16 @@ export default function App() {
   const handleLogout = () => {
     setIsAuthenticated(false);
     localStorage.removeItem('cita_authenticated');
+    localStorage.removeItem(`cita_token_${spaceId}`);
   };
 
   const handleExploreDemo = () => {
     handleLoginSuccess('AMOR-2026', 'p1');
   };
 
-  // Fetch space data from backend with smart merging and anti-wipe protection
+  // D1, D2: Fetch space data with Last-Write-Wins and strict tombstone respect (No item resurrection)
   const loadSpaceData = useCallback(async (isInitial = false) => {
     try {
-      if (isInitial && spaceData.accommodations.length === 0) setLoading(true);
       const res = await fetch(`/api/space/${spaceId}`);
       if (res.ok) {
         const serverData = await res.json();
@@ -208,9 +222,19 @@ export default function App() {
         setSpaceData((localData) => {
           if (!serverData || !serverData.id) return localData;
 
-          const deletedSet = new Set(deletedAccIds);
+          // Merge deleted tombstones
+          const serverDeleted = Array.isArray(serverData.deletedAccIds) ? serverData.deletedAccIds : [];
+          const combinedDeleted = new Set([...deletedAccIds, ...serverDeleted]);
 
-          // 1. Partner names merge: NEVER overwrite custom names with generic ones
+          // Update deletedAccIds in state if server had new tombstones
+          if (serverDeleted.some(id => !deletedAccIds.includes(id))) {
+            setDeletedAccIds(Array.from(combinedDeleted));
+            try {
+              localStorage.setItem(`cita_deleted_${spaceId}`, JSON.stringify(Array.from(combinedDeleted)));
+            } catch {}
+          }
+
+          // 1. Partners merge
           const isGeneric = (n, def) => !n || n === 'Pareja 1' || n === 'Pareja 2' || n === 'Cami' || n === 'Nico' || n === def;
           
           const localP1 = localData.partners?.partner1?.name;
@@ -242,36 +266,51 @@ export default function App() {
             }
           };
 
-          // 2. Accommodations Union Merge (Never drop local items!)
+          // 2. Accommodations LWW Merge (Never resurrect deleted items!)
           const serverAccs = Array.isArray(serverData.accommodations) ? serverData.accommodations : [];
           const localAccs = Array.isArray(localData.accommodations) ? localData.accommodations : [];
 
           const accMap = new Map();
 
-          // Local items first
+          // Existing local items first (if not deleted)
           for (const acc of localAccs) {
-            if (acc && acc.id && !deletedSet.has(acc.id)) {
+            if (acc && acc.id && !combinedDeleted.has(acc.id)) {
               accMap.set(acc.id, acc);
             }
           }
 
-          // Server items merged
+          // Server items merged with Last-Write-Wins
           for (const sAcc of serverAccs) {
-            if (!sAcc || !sAcc.id || deletedSet.has(sAcc.id)) continue;
+            if (!sAcc || !sAcc.id || combinedDeleted.has(sAcc.id)) continue;
+            
             if (!accMap.has(sAcc.id)) {
               accMap.set(sAcc.id, sAcc);
             } else {
               const lAcc = accMap.get(sAcc.id);
+              const sTime = new Date(sAcc.updatedAt || 0).getTime();
+              const lTime = new Date(lAcc.updatedAt || 0).getTime();
+
+              const base = sTime >= lTime ? { ...lAcc, ...sAcc } : { ...sAcc, ...lAcc };
+
+              // Merge comments by unique id
+              const commentMap = new Map();
+              for (const c of (lAcc.comments || [])) {
+                if (c && c.id) commentMap.set(c.id, c);
+              }
+              for (const c of (sAcc.comments || [])) {
+                if (c && c.id) commentMap.set(c.id, c);
+              }
+              const mergedComments = Array.from(commentMap.values()).sort(
+                (a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime()
+              );
+
               accMap.set(sAcc.id, {
-                ...lAcc,
-                ...sAcc,
+                ...base,
                 reactions: {
                   p1: sAcc.reactions?.p1?.liked !== undefined ? sAcc.reactions.p1 : lAcc.reactions?.p1,
                   p2: sAcc.reactions?.p2?.liked !== undefined ? sAcc.reactions.p2 : lAcc.reactions?.p2
                 },
-                comments: (sAcc.comments?.length || 0) >= (lAcc.comments?.length || 0)
-                  ? sAcc.comments
-                  : (lAcc.comments || [])
+                comments: mergedComments
               });
             }
           }
@@ -297,12 +336,7 @@ export default function App() {
 
           try {
             localStorage.setItem(`cita_cache_${spaceId}`, JSON.stringify(mergedState));
-          } catch (_) {}
-
-          // If server was freshly initialized or missing items that exist locally, re-hydrate server immediately!
-          if (serverData._isFreshInit || localAccs.length > serverAccs.length) {
-            syncSpaceToServer(mergedState);
-          }
+          } catch {}
 
           return mergedState;
         });
@@ -314,13 +348,18 @@ export default function App() {
     }
   }, [spaceId, deletedAccIds]);
 
-  // Initial load + Real-time synchronization polling (every 4 seconds)
+  // D3: Polling optimization (8s interval, pauses when tab is hidden)
   useEffect(() => {
     if (!isAuthenticated) return;
     loadSpaceData(true);
+
     const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+        return; // Pause polling when tab is in background
+      }
       loadSpaceData(false);
-    }, 4000);
+    }, 8000);
+
     return () => clearInterval(interval);
   }, [loadSpaceData, isAuthenticated]);
 
@@ -339,76 +378,110 @@ export default function App() {
       ...updates
     }), true);
 
+    const token = localStorage.getItem(`cita_token_${spaceId}`);
     fetch(`/api/space/${spaceId}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {})
+      },
       body: JSON.stringify(updates)
     }).catch(() => {});
   };
 
-  const handleUpdateApiKey = (key) => {
-    setApiKey(key);
-    localStorage.setItem('cita_gemini_key', key);
-    showToast('Clave de IA guardada');
-  };
-
   const handleLinkGoogle = async (googleData) => {
     try {
-      const res = await fetch(`/api/space/${spaceId}/link-google`, {
+      const res = await fetch(`/api/space/${spaceId}/link-email`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email: googleData.email,
-          name: googleData.name,
-          picture: googleData.picture
+          name: googleData.name
         })
       });
       if (res.ok) {
         const data = await res.json();
         if (data.space) {
           updateSpaceData(data.space, true);
-          showToast(`¡Espacio vinculado a Google (${googleData.email})! 🔐💕`);
+          showToast(`¡Espacio respaldado con ${googleData.email}! 🔐💕`);
         }
       }
     } catch (err) {
-      console.error('Error linking Google:', err);
+      console.error('Error linking email:', err);
     }
   };
 
-  // Add accommodation (instant optimistic UI + local-first persistence)
-  const handleAddAccommodation = async (newAcc) => {
-    const fullItem = {
-      id: newAcc.id || 'acc_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
-      ...newAcc,
-      currency: newAcc.currency || spaceData.currency || 'CLP',
-      createdAt: new Date().toISOString(),
-      reactions: newAcc.reactions || {
-        p1: { liked: true, reaction: 'love', note: '' },
-        p2: { liked: false, reaction: null, note: '' }
-      },
-      comments: newAcc.comments || []
-    };
+  // U5: Add or Edit Accommodation
+  const handleSaveAccommodation = async (accData) => {
+    const now = new Date().toISOString();
 
-    updateSpaceData((prev) => ({
-      ...prev,
-      accommodations: [fullItem, ...prev.accommodations.filter((a) => a.id !== fullItem.id)]
-    }), true);
+    if (editingAccommodation) {
+      // Editing existing accommodation
+      const updated = {
+        ...editingAccommodation,
+        ...accData,
+        id: editingAccommodation.id,
+        updatedAt: now
+      };
 
-    showToast('¡Alojamiento agregado a la lista! 💕');
+      updateSpaceData((prev) => ({
+        ...prev,
+        accommodations: prev.accommodations.map((a) => (a.id === updated.id ? updated : a))
+      }), true);
 
-    try {
-      await fetch(`/api/space/${spaceId}/accommodations`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(fullItem)
-      });
-    } catch (err) {
-      console.warn('Network issue adding accommodation, saved offline and queued sync:', err);
+      showToast('¡Alojamiento actualizado con éxito! 💕');
+
+      try {
+        await fetch(`/api/space/${spaceId}/accommodations/${updated.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updated)
+        });
+      } catch (err) {
+        console.warn('Error saving accommodation edit online:', err);
+      }
+    } else {
+      // Adding new accommodation
+      const fullItem = {
+        id: 'acc_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+        ...accData,
+        currency: accData.currency || spaceData.currency || 'CLP',
+        createdAt: now,
+        updatedAt: now,
+        reactions: accData.reactions || {
+          p1: { liked: currentPartnerId === 'p1', reaction: 'love', note: '', updatedAt: now },
+          p2: { liked: currentPartnerId === 'p2', reaction: 'love', note: '', updatedAt: now }
+        },
+        comments: accData.comments || []
+      };
+
+      updateSpaceData((prev) => ({
+        ...prev,
+        accommodations: [fullItem, ...prev.accommodations.filter((a) => a.id !== fullItem.id)]
+      }), true);
+
+      showToast('¡Alojamiento agregado a la lista! 💕');
+
+      try {
+        await fetch(`/api/space/${spaceId}/accommodations`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(fullItem)
+        });
+      } catch (err) {
+        console.warn('Network issue adding accommodation, saved locally:', err);
+      }
     }
+
+    setEditingAccommodation(null);
+    setIsAddModalOpen(false);
   };
 
-  // Toggle reaction (Heart / Note)
+  // Toggle reaction (Heart / Note) with timestamp
   const handleToggleReaction = async (accId, reactionPayload) => {
+    const now = new Date().toISOString();
+    const payloadWithTime = { ...reactionPayload, updatedAt: now };
+
     updateSpaceData((prev) => {
       const nextAccs = prev.accommodations.map((a) => {
         if (a.id === accId) {
@@ -417,11 +490,11 @@ export default function App() {
           const pKey = reactionPayload.partnerId === 'p2' ? 'p2' : 'p1';
 
           const updatedReactions = {
-            p1: pKey === 'p1' ? { ...currentP1, ...reactionPayload } : currentP1,
-            p2: pKey === 'p2' ? { ...currentP2, ...reactionPayload } : currentP2
+            p1: pKey === 'p1' ? { ...currentP1, ...payloadWithTime } : currentP1,
+            p2: pKey === 'p2' ? { ...currentP2, ...payloadWithTime } : currentP2
           };
 
-          return { ...a, reactions: updatedReactions };
+          return { ...a, reactions: updatedReactions, updatedAt: now };
         }
         return a;
       });
@@ -432,7 +505,7 @@ export default function App() {
       const res = await fetch(`/api/space/${spaceId}/accommodations/${accId}/reaction`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(reactionPayload)
+        body: JSON.stringify(payloadWithTime)
       });
 
       if (res.ok) {
@@ -451,7 +524,7 @@ export default function App() {
     }
   };
 
-  // Delete accommodation
+  // Delete accommodation with tombstone (Fixes D1)
   const handleDeleteAccommodation = async (accId) => {
     if (!window.confirm('¿Seguro que quieren eliminar este alojamiento de su lista?')) return;
 
@@ -603,11 +676,12 @@ export default function App() {
           partners={spaceData.partners}
           currentPartnerId={currentPartnerId}
           onSwitchPartner={handleSwitchPartner}
-          onOpenAddModal={() => setIsAddModalOpen(true)}
+          onOpenAddModal={() => {
+            setEditingAccommodation(null);
+            setIsAddModalOpen(true);
+          }}
           onOpenAiModal={() => setIsAiModalOpen(true)}
           onOpenSettingsModal={() => setIsSettingsModalOpen(true)}
-          accommodationsCount={spaceData.accommodations.length}
-          matchesCount={matchesCount}
           onLogout={handleLogout}
           onOpenShareModal={() => setIsShareModalOpen(true)}
         />
@@ -650,7 +724,14 @@ export default function App() {
                 ? 'Aún no tienen un lugar donde ambos hayan votado con corazón. ¡Exploren y dejen sus opiniones!'
                 : 'Agreguen opciones pegando links de Airbnb, Booking o Instagram para empezar a comparar.'}
             </p>
-            <button className="btn btn-primary" onClick={() => setIsAddModalOpen(true)}>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => {
+                setEditingAccommodation(null);
+                setIsAddModalOpen(true);
+              }}
+            >
               <Plus size={16} />
               <span>Agregar Alojamiento con IA</span>
             </button>
@@ -666,7 +747,11 @@ export default function App() {
                 partners={spaceData.partners}
                 currentPartnerId={currentPartnerId}
                 onToggleReaction={handleToggleReaction}
-                onOpenComments={(item) => setActiveCommentItem(item)}
+                onOpenComments={(targetItem) => setActiveCommentItem(targetItem)}
+                onEdit={(targetItem) => {
+                  setEditingAccommodation(targetItem);
+                  setIsAddModalOpen(true);
+                }}
                 onDelete={handleDeleteAccommodation}
               />
             ))}
@@ -679,7 +764,11 @@ export default function App() {
             partners={spaceData.partners}
             currentPartnerId={currentPartnerId}
             onToggleReaction={handleToggleReaction}
-            onOpenComments={(item) => setActiveCommentItem(item)}
+            onOpenComments={(targetItem) => setActiveCommentItem(targetItem)}
+            onEdit={(targetItem) => {
+              setEditingAccommodation(targetItem);
+              setIsAddModalOpen(true);
+            }}
             onDelete={handleDeleteAccommodation}
           />
         )}
@@ -689,20 +778,26 @@ export default function App() {
       <MobileBottomNav
         currentPartner={spaceData.partners[currentPartnerId === 'p2' ? 'partner2' : 'partner1'] || { name: 'Pareja', avatar: '🌸' }}
         onSwitchPartner={handleSwitchPartner}
-        onOpenAddModal={() => setIsAddModalOpen(true)}
+        onOpenAddModal={() => {
+          setEditingAccommodation(null);
+          setIsAddModalOpen(true);
+        }}
         onOpenAiModal={() => setIsAiModalOpen(true)}
         onOpenSettingsModal={() => setIsSettingsModalOpen(true)}
         matchesCount={matchesCount}
       />
 
-      {/* Add Accommodation Modal */}
+      {/* Add / Edit Accommodation Modal */}
       <AddAccommodationModal
         isOpen={isAddModalOpen}
-        onClose={() => setIsAddModalOpen(false)}
-        onAdd={handleAddAccommodation}
+        onClose={() => {
+          setIsAddModalOpen(false);
+          setEditingAccommodation(null);
+        }}
+        onAdd={handleSaveAccommodation}
         currentPartnerId={currentPartnerId}
         currency={spaceData.currency}
-        apiKey={apiKey}
+        initialItem={editingAccommodation}
       />
 
       {/* AI Romantic Concierge Modal */}
@@ -713,7 +808,6 @@ export default function App() {
         nights={spaceData.nights}
         currency={spaceData.currency}
         partners={spaceData.partners}
-        apiKey={apiKey}
       />
 
       {/* Couple Settings Modal */}
@@ -725,8 +819,6 @@ export default function App() {
         partners={spaceData.partners}
         currentPartnerId={currentPartnerId}
         onUpdateTrip={handleUpdateTrip}
-        apiKey={apiKey}
-        onUpdateApiKey={handleUpdateApiKey}
         googleOwner={spaceData.googleOwner}
         onLinkGoogle={handleLinkGoogle}
       />
@@ -756,7 +848,7 @@ export default function App() {
       {/* Mutual Match / Toast alert */}
       {toastMessage && (
         <div className="match-toast">
-          <span>💕</span>
+          <span aria-hidden="true">💕</span>
           <span>{toastMessage}</span>
         </div>
       )}

@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Sparkles, X, Award, DollarSign, Crown, Heart, RefreshCw, Compass } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Sparkles, X, Heart, RefreshCw } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
 export default function AiConciergeModal({
@@ -8,70 +8,102 @@ export default function AiConciergeModal({
   accommodations,
   nights,
   currency,
-  partners,
-  apiKey
+  partners
 }) {
   const [loading, setLoading] = useState(false);
   const [recommendation, setRecommendation] = useState(null);
   const [error, setError] = useState(null);
 
-  const p1 = partners.partner1 || { name: 'Cami', avatar: '🌸' };
-  const p2 = partners.partner2 || { name: 'Nico', avatar: '🐻' };
+  const p1 = partners?.partner1 || { name: 'Cami', avatar: '🌸' };
+  const p2 = partners?.partner2 || { name: 'Nico', avatar: '🐻' };
 
-  const fetchRecommendation = async () => {
+  // Q7: Body scroll lock & U6: Escape key listener
+  useEffect(() => {
+    if (!isOpen) return;
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isOpen, onClose]);
+
+  const loadRecommendation = useCallback((signal) => {
     if (!accommodations || accommodations.length === 0) return;
 
     setLoading(true);
     setError(null);
 
-    try {
-      const res = await fetch('/api/ai/recommend', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          accommodations,
-          nights,
-          currency,
-          partners,
-          apiKey
-        })
+    // S5: Uses server-managed Gemini key only
+    fetch('/api/ai/recommend', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        accommodations,
+        nights,
+        currency,
+        partners
+      }),
+      signal
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && data.recommendation) {
+          setRecommendation(data.recommendation);
+          confetti({
+            particleCount: 60,
+            spread: 60,
+            origin: { y: 0.5 },
+            colors: ['#FB7185', '#C084FC', '#FBBF24']
+          });
+        } else {
+          setError(data.error || 'No se pudo generar la recomendación.');
+        }
+      })
+      .catch((err) => {
+        if (err.name !== 'AbortError') {
+          console.error('Error fetching recommendation:', err);
+          setError('Hubo un error de conexión con el Asesor IA.');
+        }
+      })
+      .finally(() => {
+        setLoading(false);
       });
+  }, [accommodations, nights, currency, partners]);
 
-      const data = await res.json();
-      if (data.success && data.recommendation) {
-        setRecommendation(data.recommendation);
-        // Throw celebration confetti for the verdict!
-        confetti({
-          particleCount: 60,
-          spread: 60,
-          origin: { y: 0.5 },
-          colors: ['#FB7185', '#C084FC', '#FBBF24']
-        });
-      } else {
-        setError(data.error || 'No se pudo generar la recomendación.');
-      }
-    } catch (err) {
-      console.error('Error fetching recommendation:', err);
-      setError('Hubo un error de conexión con el Asesor IA.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
+  // Q3: Safe effect with AbortController to prevent leaks and infinite loops
   useEffect(() => {
-    if (isOpen && accommodations.length > 0 && !recommendation) {
-      fetchRecommendation();
-    }
-  }, [isOpen, accommodations]);
+    if (!isOpen || !accommodations || accommodations.length === 0) return;
+    if (recommendation) return;
+
+    const controller = new AbortController();
+    loadRecommendation(controller.signal);
+
+    return () => {
+      controller.abort();
+    };
+  }, [isOpen, accommodations, recommendation, loadRecommendation]);
 
   if (!isOpen) return null;
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div
+      className="modal-overlay"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Asesor Romántico IA"
+    >
       <div className="modal-content" style={{ maxWidth: '720px' }} onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <div className="concierge-avatar">
+            <div className="concierge-avatar" aria-hidden="true">
               🕊️
             </div>
             <div>
@@ -81,7 +113,7 @@ export default function AiConciergeModal({
               </p>
             </div>
           </div>
-          <button className="close-btn" onClick={onClose}>
+          <button className="close-btn" onClick={onClose} aria-label="Cerrar modal">
             <X size={18} />
           </button>
         </div>
@@ -101,7 +133,14 @@ export default function AiConciergeModal({
         ) : error ? (
           <div style={{ textAlign: 'center', padding: '2rem 1rem' }}>
             <p style={{ color: '#EF4444', marginBottom: '1rem' }}>{error}</p>
-            <button className="btn btn-secondary" onClick={fetchRecommendation}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => {
+                const controller = new AbortController();
+                loadRecommendation(controller.signal);
+              }}
+            >
               Reintentar
             </button>
           </div>
@@ -172,14 +211,18 @@ export default function AiConciergeModal({
             {/* Modal actions */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1.75rem' }}>
               <button
+                type="button"
                 className="btn btn-secondary btn-sm"
-                onClick={fetchRecommendation}
+                onClick={() => {
+                  const controller = new AbortController();
+                  loadRecommendation(controller.signal);
+                }}
                 disabled={loading}
               >
                 <RefreshCw size={14} /> Volver a analizar
               </button>
 
-              <button className="btn btn-primary" onClick={onClose}>
+              <button type="button" className="btn btn-primary" onClick={onClose}>
                 ¡Entendido, a reservar! 💕
               </button>
             </div>

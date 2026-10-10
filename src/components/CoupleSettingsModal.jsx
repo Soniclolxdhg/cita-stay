@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { X, Users, Copy, Check, Share2, Sparkles, Key, Smartphone } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { X, Copy, Check, Share2, Key } from 'lucide-react';
 
 import GoogleAuthModal from './GoogleAuthModal';
 
@@ -28,18 +28,32 @@ export default function CoupleSettingsModal({
   const [copied, setCopied] = useState(false);
   const [isGoogleModalOpen, setIsGoogleModalOpen] = useState(false);
 
+  // Q7: Body scroll lock & U6: Escape key listener
+  useEffect(() => {
+    if (!isOpen) return;
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   const targetRole = currentPartnerId === 'p1' ? 'p2' : 'p1';
   const targetPartnerName = partners[targetRole === 'p2' ? 'partner2' : 'partner1']?.name || 'tu pareja';
   const targetPartnerAvatar = partners[targetRole === 'p2' ? 'partner2' : 'partner1']?.avatar || '💌';
 
+  // U2: Clean URL with NO PII in query parameters
   const baseUrl = window.location.origin + window.location.pathname;
-  const p1Param = encodeURIComponent(partners.partner1?.name || p1Name || '');
-  const p2Param = encodeURIComponent(partners.partner2?.name || p2Name || '');
-  const p1Av = encodeURIComponent(partners.partner1?.avatar || p1Avatar || '🌸');
-  const p2Av = encodeURIComponent(partners.partner2?.avatar || p2Avatar || '🐻');
-  const partnerShareUrl = `${baseUrl}?space=${spaceId}&partner=${targetRole}&p1=${p1Param}&p2=${p2Param}&p1a=${p1Av}&p2a=${p2Av}`;
+  const partnerShareUrl = `${baseUrl}?space=${spaceId}&partner=${targetRole}`;
 
   const whatsappMsg = `¡Hola mi amor! 💕 Creé nuestro nido en Cita Stay para que elijamos y votemos nuestros alojamientos juntos.\n\nToca aquí para entrar directamente como ${targetPartnerAvatar} ${targetPartnerName}:\n${partnerShareUrl}`;
   const whatsappUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(whatsappMsg)}`;
@@ -68,14 +82,20 @@ export default function CoupleSettingsModal({
   };
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div
+      className="modal-overlay"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Espacio de Pareja & Conexión"
+    >
       <div className="modal-content" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h3>
-            <span>⚙️</span>
+            <span aria-hidden="true">⚙️</span>
             <span>Espacio de Pareja & Conexión</span>
           </h3>
-          <button className="close-btn" onClick={onClose}>
+          <button className="close-btn" onClick={onClose} aria-label="Cerrar modal">
             <X size={18} />
           </button>
         </div>

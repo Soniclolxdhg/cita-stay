@@ -17,8 +17,9 @@ dist-ssr
 !.vscode/extensions.json
 .idea
 .DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
+# Local database & sensitive data
+data/
+data/*
+.env
+.env.*
+*.env

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Moon, DollarSign, Heart } from 'lucide-react';
+import { Moon, DollarSign } from 'lucide-react';
 
 export default function TripBanner({
   tripName,
@@ -7,7 +7,6 @@ export default function TripBanner({
   currency,
   onUpdateTrip,
   partners,
-  totalCount,
   matchesCount
 }) {
   const p1 = partners.partner1 || { name: 'Cami', avatar: '🌸' };

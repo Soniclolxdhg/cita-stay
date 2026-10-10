@@ -1,5 +1,5 @@
 import React from 'react';
-import { Sparkles, Plus, Settings, Users } from 'lucide-react';
+import { Sparkles, Plus, Settings } from 'lucide-react';
 
 export default function MobileBottomNav({
   currentPartner,

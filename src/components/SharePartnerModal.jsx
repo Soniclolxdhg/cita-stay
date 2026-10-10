@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { X, Copy, Check, Share2, Smartphone, Heart, Sparkles } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { X, Copy, Check } from 'lucide-react';
 
 export default function SharePartnerModal({
   isOpen,
@@ -12,6 +12,23 @@ export default function SharePartnerModal({
   const [copiedPartner, setCopiedPartner] = useState(false);
   const [copiedMine, setCopiedMine] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
+
+  // Q7: Body scroll lock & U6: Escape key listener
+  useEffect(() => {
+    if (!isOpen) return;
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -31,15 +48,9 @@ export default function SharePartnerModal({
   // Base URL
   const baseUrl = window.location.origin + window.location.pathname;
 
-  // Personalized link with names and avatars preloaded
-  const p1Param = encodeURIComponent(partners.partner1?.name || '');
-  const p2Param = encodeURIComponent(partners.partner2?.name || '');
-  const p1Avatar = encodeURIComponent(partners.partner1?.avatar || '🌸');
-  const p2Avatar = encodeURIComponent(partners.partner2?.avatar || '🐻');
-  const partnerInviteUrl = `${baseUrl}?space=${spaceId}&partner=${targetRole}&p1=${p1Param}&p2=${p2Param}&p1a=${p1Avatar}&p2a=${p2Avatar}`;
-
-  // My own personal link
-  const myPersonalUrl = `${baseUrl}?space=${spaceId}&partner=${myRole}&p1=${p1Param}&p2=${p2Param}&p1a=${p1Avatar}&p2a=${p2Avatar}`;
+  // U2: Clean, secure invite links with NO PII parameters leaked in query string
+  const partnerInviteUrl = `${baseUrl}?space=${spaceId}&partner=${targetRole}`;
+  const myPersonalUrl = `${baseUrl}?space=${spaceId}&partner=${myRole}`;
 
   // WhatsApp message pre-filled
   const whatsappMessage = `¡Hola mi amor! 💕 Creé nuestro nido en Cita Stay para que elijamos y votemos nuestros alojamientos juntos.\n\nToca aquí para entrar directamente como ${targetPartner.avatar} ${targetPartner.name}:\n${partnerInviteUrl}`;
@@ -52,11 +63,17 @@ export default function SharePartnerModal({
   };
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div
+      className="modal-overlay"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Invitar a tu Pareja"
+    >
       <div className="modal-content" style={{ maxWidth: '560px' }} onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-            <div style={{ fontSize: '1.8rem' }}>💌</div>
+            <div style={{ fontSize: '1.8rem' }} aria-hidden="true">💌</div>
             <div>
               <h3 style={{ margin: 0, fontSize: '1.35rem' }}>Invitar a tu Pareja</h3>
               <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--text-muted)' }}>
@@ -64,7 +81,7 @@ export default function SharePartnerModal({
               </p>
             </div>
           </div>
-          <button className="close-btn" onClick={onClose}>
+          <button className="close-btn" onClick={onClose} aria-label="Cerrar ventana">
             <X size={18} />
           </button>
         </div>
@@ -79,12 +96,12 @@ export default function SharePartnerModal({
           boxShadow: 'var(--shadow-subtle)'
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', marginBottom: '0.4rem', fontWeight: 700, color: 'var(--rose-600)', fontSize: '0.92rem' }}>
-            <span>{targetPartner.avatar}</span>
+            <span aria-hidden="true">{targetPartner.avatar}</span>
             <span>Enlace Exclusivo para {targetPartner.name}</span>
           </div>
 
           <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginBottom: '0.85rem', lineHeight: '1.4' }}>
-            Al abrir este enlace en su celular o iPhone, entrará <strong>directamente con su propio perfil ({targetPartner.avatar} {targetPartner.name})</strong>. Podrá dar sus propios corazones y notas en tiempo real.
+            Al abrir este enlace en su celular o computador, entrará <strong>directamente con su propio perfil ({targetPartner.avatar} {targetPartner.name})</strong>. Podrá dar sus propios corazones y notas en tiempo real.
           </p>
 
           <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem' }}>
@@ -93,13 +110,14 @@ export default function SharePartnerModal({
               readOnly
               value={partnerInviteUrl}
               className="form-input"
+              aria-label="Enlace para tu pareja"
               style={{ fontSize: '0.82rem', background: 'white' }}
             />
             <button
               type="button"
               className="btn btn-secondary btn-sm"
               onClick={() => copyToClipboard(partnerInviteUrl, setCopiedPartner)}
-              title="Copiar enlace de invitación"
+              aria-label="Copiar enlace de invitación"
             >
               {copiedPartner ? <Check size={14} color="#10B981" /> : <Copy size={14} />}
               <span>{copiedPartner ? '¡Copiado!' : 'Copiar'}</span>
@@ -119,7 +137,7 @@ export default function SharePartnerModal({
               fontSize: '0.9rem'
             }}
           >
-            <span>📲</span>
+            <span aria-hidden="true">📲</span>
             <span>Enviar Invitación por WhatsApp a {targetPartner.name}</span>
           </a>
         </div>
@@ -128,7 +146,7 @@ export default function SharePartnerModal({
         <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border-soft)', borderRadius: 'var(--radius-md)', padding: '1rem', marginBottom: '1rem' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
             <span style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-              <span>{myPartner.avatar}</span>
+              <span aria-hidden="true">{myPartner.avatar}</span>
               <span>Tu enlace personal ({myPartner.name})</span>
             </span>
             <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Para tus marcadores</span>
@@ -140,12 +158,14 @@ export default function SharePartnerModal({
               readOnly
               value={myPersonalUrl}
               className="form-input"
+              aria-label="Tu enlace personal"
               style={{ fontSize: '0.78rem', background: 'white' }}
             />
             <button
               type="button"
               className="btn btn-secondary btn-sm"
               onClick={() => copyToClipboard(myPersonalUrl, setCopiedMine)}
+              aria-label="Copiar tu enlace personal"
               style={{ fontSize: '0.78rem', padding: '0.3rem 0.65rem' }}
             >
               {copiedMine ? <Check size={13} color="#10B981" /> : <Copy size={13} />}
@@ -166,6 +186,7 @@ export default function SharePartnerModal({
             type="button"
             className="btn btn-secondary btn-sm"
             onClick={() => copyToClipboard(spaceId, setCopiedCode)}
+            aria-label="Copiar código de nido"
           >
             {copiedCode ? <Check size={13} color="#10B981" /> : <Copy size={13} />}
             <span>{copiedCode ? '¡Copiado!' : 'Copiar Código'}</span>

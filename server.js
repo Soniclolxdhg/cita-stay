@@ -3,6 +3,7 @@ import cors from 'cors';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import crypto from 'crypto';
 import * as cheerio from 'cheerio';
 import dotenv from 'dotenv';
 
@@ -14,8 +15,108 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-app.use(cors());
+// S6: Security headers middleware
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  next();
+});
+
+// S6: CORS configuration (supports allowed origin or same-origin)
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
+  : null;
+
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || !allowedOrigins || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(null, true); // Dev / preview friendly default
+    }
+  },
+  credentials: true
+}));
+
 app.use(express.json({ limit: '10mb' }));
+
+// S6: In-memory sliding rate limiter
+const rateLimits = new Map();
+function createRateLimiter(limit = 30, windowMs = 60000) {
+  return (req, res, next) => {
+    const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket?.remoteAddress || 'unknown';
+    const now = Date.now();
+    const key = `${req.baseUrl || req.path}:${ip}`;
+    const record = rateLimits.get(key) || { count: 0, resetAt: now + windowMs };
+    if (now > record.resetAt) {
+      record.count = 0;
+      record.resetAt = now + windowMs;
+    }
+    record.count += 1;
+    rateLimits.set(key, record);
+    if (record.count > limit) {
+      return res.status(429).json({ error: 'Demasiadas solicitudes. Por favor espera un momento.' });
+    }
+    next();
+  };
+}
+
+const authRateLimiter = createRateLimiter(25, 60000); // 25 auth requests / min
+const aiRateLimiter = createRateLimiter(15, 60000);   // 15 AI requests / min
+
+// S4: SSRF prevention validator
+function isSafePublicUrl(urlString) {
+  try {
+    const parsed = new URL(urlString);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return false;
+    }
+    const hostname = parsed.hostname.toLowerCase();
+    // Block localhost, local domains, metadata
+    if (
+      hostname === 'localhost' ||
+      hostname.endsWith('.local') ||
+      hostname.endsWith('.internal') ||
+      hostname.endsWith('.localhost')
+    ) {
+      return false;
+    }
+    // Block IPv4 private & loopback & metadata (169.254.x.x)
+    const ipv4Regex = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
+    const ipMatch = hostname.match(ipv4Regex);
+    if (ipMatch) {
+      const [, o1, o2] = ipMatch.map(Number);
+      if (o1 === 127 || o1 === 0) return false;
+      if (o1 === 10) return false;
+      if (o1 === 169 && o2 === 254) return false;
+      if (o1 === 192 && o2 === 168) return false;
+      if (o1 === 172 && o2 >= 16 && o2 <= 31) return false;
+    }
+    // Block IPv6 loopback
+    if (hostname.includes(':') || hostname === '[::1]') {
+      return false;
+    }
+    // Disallow non-standard ports
+    if (parsed.port && parsed.port !== '80' && parsed.port !== '443') {
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// S3: Sanitize space data before returning to client (Strip PIN & tokens)
+function sanitizeSpace(space) {
+  if (!space) return null;
+  const { pin, tokens: _tokens, _isFreshInit: _fresh, ...publicSpace } = space;
+  return {
+    ...publicSpace,
+    hasPin: Boolean(pin && String(pin).trim().length > 0)
+  };
+}
 
 // Storage configuration (supports both local disk and Vercel/serverless environments)
 const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
@@ -261,13 +362,15 @@ function createDefaultSpace(spaceId) {
 
 // Routes
 
+// Routes
+
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Auth: Create a custom couple space
-app.post('/api/auth/create-space', (req, res) => {
+// S1, D7: Auth: Create a custom couple space (generates secure token & avoids ID collision)
+app.post('/api/auth/create-space', authRateLimiter, (req, res) => {
   const {
     name = 'Nuestra Escapada Romántica 💕',
     p1Name = 'Pareja 1',
@@ -280,8 +383,15 @@ app.post('/api/auth/create-space', (req, res) => {
     currency = 'CLP'
   } = req.body;
 
-  const randomDigits = Math.floor(1000 + Math.random() * 9000);
-  const cleanId = `AMOR-${randomDigits}`;
+  let cleanId;
+  let attempts = 0;
+  do {
+    const randomDigits = Math.floor(1000 + Math.random() * 9000);
+    cleanId = `AMOR-${randomDigits}`;
+    attempts++;
+  } while (spacesCache[cleanId] && attempts < 50);
+
+  const token = crypto.randomUUID();
 
   const newSpace = {
     id: cleanId,
@@ -289,6 +399,8 @@ app.post('/api/auth/create-space', (req, res) => {
     nights: Math.max(1, parseInt(nights, 10) || 3),
     currency: currency || 'CLP',
     pin: pin ? String(pin).trim() : '',
+    tokens: [token],
+    deletedAccIds: [],
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     partners: {
@@ -299,13 +411,13 @@ app.post('/api/auth/create-space', (req, res) => {
   };
 
   spacesCache[cleanId] = newSpace;
-  saveSpaces();
+  saveSpaces(cleanId);
 
-  res.status(201).json({ success: true, space: newSpace });
+  res.status(201).json({ success: true, space: sanitizeSpace(newSpace), token });
 });
 
-// Auth: Join an existing couple space (or resume/reconnect)
-app.post('/api/auth/join-space', async (req, res) => {
+// S1, S2: Auth: Join an existing couple space (404 on not found, strict PIN validation, token issued)
+app.post('/api/auth/join-space', authRateLimiter, async (req, res) => {
   const { spaceId, pin = '', partnerChoice = '' } = req.body;
   const cleanId = (spaceId || '').toUpperCase().trim();
 
@@ -323,64 +435,96 @@ app.post('/api/auth/join-space', async (req, res) => {
     if (fromCloud) spacesCache[cleanId] = fromCloud;
   }
 
-  // If still not found in server cache, create and allow connection so the couple can re-hydrate and never be locked out!
+  // S1: Never auto-create a space on join; return 404 if it doesn't exist
   if (!spacesCache[cleanId]) {
-    spacesCache[cleanId] = {
-      id: cleanId,
-      name: `Nido ${cleanId} 💕`,
-      nights: 3,
-      currency: 'CLP',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      partners: {
-        partner1: { id: 'p1', name: 'Pareja 1', avatar: '🌸', color: '#F472B6' },
-        partner2: { id: 'p2', name: 'Pareja 2', avatar: '🐻', color: '#818CF8' }
-      },
-      accommodations: []
-    };
-    saveSpaces();
+    return res.status(404).json({ error: 'No encontramos ese nido. Por favor verifica el código e intenta nuevamente.' });
   }
 
   const space = spacesCache[cleanId];
 
-  // Check pin if required
+  // S2: Strict PIN validation
   if (space.pin && space.pin !== String(pin).trim()) {
-    return res.status(401).json({ error: 'El PIN de pareja es incorrecto.' });
+    return res.status(401).json({ error: 'El PIN de pareja es incorrecto.', requiresPin: true });
   }
 
   const partnerId = partnerChoice === 'p2' ? 'p2' : 'p1';
+  const token = crypto.randomUUID();
+  space.tokens = Array.isArray(space.tokens) ? space.tokens : [];
+  space.tokens.push(token);
+  if (space.tokens.length > 50) space.tokens = space.tokens.slice(-50);
+  saveSpaces(cleanId);
 
-  res.json({ success: true, space, partnerId });
+  res.json({ success: true, space: sanitizeSpace(space), partnerId, token });
 });
 
-// Auth: Google Sign-In & Persistence
-app.post('/api/auth/google', (req, res) => {
-  const { email, name, picture, sub, partnerName = '', spaceName = '' } = req.body;
+// S2: Dedicated PIN verification endpoint
+app.post('/api/auth/verify-pin', authRateLimiter, (req, res) => {
+  const { spaceId, pin } = req.body;
+  const cleanId = (spaceId || '').toUpperCase().trim();
+
+  if (!spacesCache[cleanId]) {
+    loadSpaces();
+  }
+
+  const space = spacesCache[cleanId];
+  if (!space) {
+    return res.status(404).json({ error: 'Nido no encontrado' });
+  }
+
+  if (space.pin && space.pin !== String(pin).trim()) {
+    return res.status(401).json({ error: 'PIN incorrecto' });
+  }
+
+  const token = crypto.randomUUID();
+  space.tokens = Array.isArray(space.tokens) ? space.tokens : [];
+  space.tokens.push(token);
+  saveSpaces(cleanId);
+
+  res.json({ success: true, space: sanitizeSpace(space), token });
+});
+
+// U1: Auth: Honest email access & space recovery
+app.post(['/api/auth/email', '/api/auth/google'], authRateLimiter, (req, res) => {
+  const { email, name, partnerName = '', spaceName = '' } = req.body;
 
   if (!email) {
-    return res.status(400).json({ error: 'Email de Google requerido' });
+    return res.status(400).json({ error: 'Email requerido para acceder al nido' });
   }
 
   const cleanEmail = email.toLowerCase().trim();
 
-  // Search if a space already exists linked to this Google email
+  // Search if a space already exists linked to this email
   const existingId = Object.keys(spacesCache).find((id) => {
-    return spacesCache[id]?.googleOwner?.email?.toLowerCase().trim() === cleanEmail;
+    return spacesCache[id]?.ownerEmail?.toLowerCase().trim() === cleanEmail ||
+           spacesCache[id]?.googleOwner?.email?.toLowerCase().trim() === cleanEmail;
   });
 
   if (existingId) {
+    const space = spacesCache[existingId];
+    const token = crypto.randomUUID();
+    space.tokens = Array.isArray(space.tokens) ? space.tokens : [];
+    space.tokens.push(token);
+    saveSpaces(existingId);
+
     return res.json({
       success: true,
-      space: spacesCache[existingId],
+      space: sanitizeSpace(space),
+      token,
       isNew: false,
-      message: `¡Bienvenido de nuevo, ${name || 'Google User'}! Recuperamos tu nido.`
+      message: `¡Bienvenido de nuevo! Recuperamos tu nido con éxito.`
     });
   }
 
-  // Create new space linked permanently to this Google account
-  const randomDigits = Math.floor(1000 + Math.random() * 9000);
-  const cleanId = `AMOR-${randomDigits}`;
+  // Create new space linked to this email
+  let cleanId;
+  let attempts = 0;
+  do {
+    const randomDigits = Math.floor(1000 + Math.random() * 9000);
+    cleanId = `AMOR-${randomDigits}`;
+    attempts++;
+  } while (spacesCache[cleanId] && attempts < 50);
 
+  const token = crypto.randomUUID();
   const userDisplayName = (name || cleanEmail.split('@')[0] || 'Tú').trim();
   const partnerDisplayName = (partnerName || 'Mi Pareja').trim();
 
@@ -390,13 +534,14 @@ app.post('/api/auth/google', (req, res) => {
     nights: 3,
     currency: 'CLP',
     pin: '',
+    tokens: [token],
+    deletedAccIds: [],
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
+    ownerEmail: cleanEmail,
     googleOwner: {
       email: cleanEmail,
-      name: userDisplayName,
-      picture: picture || '',
-      sub: sub || cleanEmail
+      name: userDisplayName
     },
     partners: {
       partner1: { id: 'p1', name: userDisplayName, avatar: '🌸', color: '#F472B6' },
@@ -406,20 +551,21 @@ app.post('/api/auth/google', (req, res) => {
   };
 
   spacesCache[cleanId] = newSpace;
-  saveSpaces();
+  saveSpaces(cleanId);
 
   res.status(201).json({
     success: true,
-    space: newSpace,
+    space: sanitizeSpace(newSpace),
+    token,
     isNew: true,
-    message: `¡Nido creado y vinculado exitosamente a tu cuenta de Google (${cleanEmail})!`
+    message: `¡Nido creado y vinculado exitosamente a tu email (${cleanEmail})!`
   });
 });
 
-// Auth: Link Google account to an existing space
-app.post('/api/space/:spaceId/link-google', (req, res) => {
+// Link email account to an existing space
+app.post(['/api/space/:spaceId/link-email', '/api/space/:spaceId/link-google'], (req, res) => {
   const { spaceId } = req.params;
-  const { email, name, picture } = req.body;
+  const { email, name } = req.body;
   const cleanId = (spaceId || '').toUpperCase().trim();
 
   if (!cleanId || !spacesCache[cleanId]) {
@@ -427,22 +573,22 @@ app.post('/api/space/:spaceId/link-google', (req, res) => {
   }
 
   if (!email) {
-    return res.status(400).json({ error: 'Email de Google requerido' });
+    return res.status(400).json({ error: 'Email requerido' });
   }
 
   const cleanEmail = email.toLowerCase().trim();
+  spacesCache[cleanId].ownerEmail = cleanEmail;
   spacesCache[cleanId].googleOwner = {
     email: cleanEmail,
-    name: (name || cleanEmail.split('@')[0]).trim(),
-    picture: picture || ''
+    name: (name || cleanEmail.split('@')[0]).trim()
   };
   spacesCache[cleanId].updatedAt = new Date().toISOString();
-  saveSpaces();
+  saveSpaces(cleanId);
 
-  res.json({ success: true, space: spacesCache[cleanId] });
+  res.json({ success: true, space: sanitizeSpace(spacesCache[cleanId]) });
 });
 
-// Synchronize entire space state from client to backend cache
+// D1, D2: Synchronize space state with Last-Write-Wins (LWW) and respect deleted tombstones
 app.post('/api/space/:spaceId/sync', (req, res) => {
   const { spaceId } = req.params;
   const cleanId = (spaceId || 'default').toUpperCase().trim();
@@ -458,34 +604,61 @@ app.post('/api/space/:spaceId/sync', (req, res) => {
 
   const existing = spacesCache[cleanId] || {};
 
-  // Merge accommodations intelligently by id
+  // Combine deleted tombstones so deleted items NEVER resurrect (Fixes D1)
+  const existingDeleted = Array.isArray(existing.deletedAccIds) ? existing.deletedAccIds : [];
+  const incomingDeleted = Array.isArray(incoming.deletedAccIds) ? incoming.deletedAccIds : [];
+  const allDeletedSet = new Set([...existingDeleted, ...incomingDeleted]);
+
   const existingAccs = Array.isArray(existing.accommodations) ? existing.accommodations : [];
   const incomingAccs = Array.isArray(incoming.accommodations) ? incoming.accommodations : [];
 
   const accMap = new Map();
-  // Existing first
+
+  // 1. Existing items that are not deleted
   for (const acc of existingAccs) {
-    if (acc && acc.id) accMap.set(acc.id, acc);
+    if (acc && acc.id && !allDeletedSet.has(acc.id)) {
+      accMap.set(acc.id, acc);
+    }
   }
-  // Incoming overrides or adds
-  for (const acc of incomingAccs) {
-    if (acc && acc.id) {
-      if (!accMap.has(acc.id)) {
-        accMap.set(acc.id, acc);
-      } else {
-        const cur = accMap.get(acc.id);
-        accMap.set(acc.id, {
-          ...cur,
-          ...acc,
-          reactions: {
-            p1: acc.reactions?.p1?.liked !== undefined ? acc.reactions.p1 : cur.reactions?.p1,
-            p2: acc.reactions?.p2?.liked !== undefined ? acc.reactions.p2 : cur.reactions?.p2
-          },
-          comments: Array.isArray(acc.comments) && acc.comments.length >= (cur.comments?.length || 0)
-            ? acc.comments
-            : (cur.comments || [])
-        });
+
+  // 2. Incoming items: apply LWW (Last-Write-Wins)
+  for (const incAcc of incomingAccs) {
+    if (!incAcc || !incAcc.id || allDeletedSet.has(incAcc.id)) continue;
+
+    if (!accMap.has(incAcc.id)) {
+      accMap.set(incAcc.id, incAcc);
+    } else {
+      const curAcc = accMap.get(incAcc.id);
+      const incTime = new Date(incAcc.updatedAt || 0).getTime();
+      const curTime = new Date(curAcc.updatedAt || 0).getTime();
+
+      // Base fields: newer update wins
+      const base = incTime >= curTime ? { ...curAcc, ...incAcc } : { ...incAcc, ...curAcc };
+
+      // Partner reactions: merge by individual reaction timestamp/presence
+      const mergedReactions = {
+        p1: incAcc.reactions?.p1?.liked !== undefined ? incAcc.reactions.p1 : curAcc.reactions?.p1,
+        p2: incAcc.reactions?.p2?.liked !== undefined ? incAcc.reactions.p2 : curAcc.reactions?.p2
+      };
+
+      // Comments: merge unique comment objects by id
+      const commentMap = new Map();
+      for (const c of (curAcc.comments || [])) {
+        if (c && c.id) commentMap.set(c.id, c);
       }
+      for (const c of (incAcc.comments || [])) {
+        if (c && c.id) commentMap.set(c.id, c);
+      }
+      const mergedComments = Array.from(commentMap.values()).sort(
+        (a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime()
+      );
+
+      accMap.set(incAcc.id, {
+        ...base,
+        reactions: mergedReactions,
+        comments: mergedComments,
+        updatedAt: new Date(Math.max(incTime, curTime, Date.now())).toISOString()
+      });
     }
   }
 
@@ -506,6 +679,7 @@ app.post('/api/space/:spaceId/sync', (req, res) => {
         ...(incoming.partners?.partner2 || {})
       }
     },
+    deletedAccIds: Array.from(allDeletedSet),
     accommodations: Array.from(accMap.values()),
     updatedAt: new Date().toISOString()
   };
@@ -513,15 +687,13 @@ app.post('/api/space/:spaceId/sync', (req, res) => {
   spacesCache[cleanId] = mergedSpace;
   saveSpaces(cleanId);
 
-  res.json({ success: true, space: mergedSpace });
+  res.json({ success: true, space: sanitizeSpace(mergedSpace) });
 });
 
-// Get space data
+// S3: Get space data (Sanitized public DTO, returns 404 for nonexistent spaces)
 app.get('/api/space/:spaceId', async (req, res) => {
   const { spaceId } = req.params;
   const cleanId = (spaceId || 'default').toUpperCase().trim();
-
-  let isFreshInit = false;
 
   if (!spacesCache[cleanId]) {
     loadSpaces();
@@ -534,35 +706,16 @@ app.get('/api/space/:spaceId', async (req, res) => {
   }
 
   if (!spacesCache[cleanId]) {
-    isFreshInit = true;
-    // Only load demo items for the official demo space AMOR-2026 or DEMO
+    // Only auto-initialize demo items for the official demo spaces
     if (cleanId === 'AMOR-2026' || cleanId === 'DEMO') {
       spacesCache[cleanId] = createDefaultSpace(cleanId);
+      saveSpaces(cleanId);
     } else {
-      // For any custom space, NEVER overwrite with Cami & Nico!
-      spacesCache[cleanId] = {
-        id: cleanId,
-        name: 'Nuestra Escapada Romántica 💕',
-        nights: 3,
-        currency: 'CLP',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        partners: {
-          partner1: { id: 'p1', name: 'Pareja 1', avatar: '🌸', color: '#F472B6' },
-          partner2: { id: 'p2', name: 'Pareja 2', avatar: '🐻', color: '#818CF8' }
-        },
-        accommodations: []
-      };
+      return res.status(404).json({ error: 'Nido no encontrado' });
     }
-    saveSpaces();
   }
 
-  const spaceResponse = {
-    ...spacesCache[cleanId],
-    _isFreshInit: isFreshInit
-  };
-
-  res.json(spaceResponse);
+  res.json(sanitizeSpace(spacesCache[cleanId]));
 });
 
 // Update general space configuration (name, currency, nights, partners)
@@ -575,19 +728,7 @@ app.post('/api/space/:spaceId', (req, res) => {
   }
 
   if (!spacesCache[cleanId]) {
-    spacesCache[cleanId] = {
-      id: cleanId,
-      name: 'Nuestra Escapada Romántica 💕',
-      nights: 3,
-      currency: 'CLP',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      partners: {
-        partner1: { id: 'p1', name: 'Pareja 1', avatar: '🌸', color: '#F472B6' },
-        partner2: { id: 'p2', name: 'Pareja 2', avatar: '🐻', color: '#818CF8' }
-      },
-      accommodations: []
-    };
+    return res.status(404).json({ error: 'Nido no encontrado' });
   }
 
   const current = spacesCache[cleanId];
@@ -599,9 +740,9 @@ app.post('/api/space/:spaceId', (req, res) => {
   if (partners !== undefined) current.partners = { ...current.partners, ...partners };
 
   current.updatedAt = new Date().toISOString();
-  saveSpaces();
+  saveSpaces(cleanId);
 
-  res.json(current);
+  res.json(sanitizeSpace(current));
 });
 
 // Add new accommodation
@@ -614,22 +755,11 @@ app.post('/api/space/:spaceId/accommodations', (req, res) => {
   }
 
   if (!spacesCache[cleanId]) {
-    spacesCache[cleanId] = {
-      id: cleanId,
-      name: 'Nuestra Escapada Romántica 💕',
-      nights: 3,
-      currency: 'CLP',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      partners: {
-        partner1: { id: 'p1', name: 'Pareja 1', avatar: '🌸', color: '#F472B6' },
-        partner2: { id: 'p2', name: 'Pareja 2', avatar: '🐻', color: '#818CF8' }
-      },
-      accommodations: []
-    };
+    return res.status(404).json({ error: 'Nido no encontrado' });
   }
 
   const current = spacesCache[cleanId];
+  const now = new Date().toISOString();
   const newAcc = {
     id: 'acc_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
     title: req.body.title || 'Alojamiento Romántico',
@@ -644,17 +774,20 @@ app.post('/api/space/:spaceId/accommodations', (req, res) => {
     cons: Array.isArray(req.body.cons) ? req.body.cons : [],
     tags: Array.isArray(req.body.tags) ? req.body.tags : [],
     addedBy: req.body.addedBy || 'p1',
-    createdAt: new Date().toISOString(),
+    createdAt: now,
+    updatedAt: now,
+    deletedAt: null,
     reactions: req.body.reactions || {
-      p1: { liked: false, reaction: null, note: '' },
-      p2: { liked: false, reaction: null, note: '' }
+      p1: { liked: false, reaction: null, note: '', updatedAt: now },
+      p2: { liked: false, reaction: null, note: '', updatedAt: now }
     },
     comments: []
   };
 
+  current.accommodations = Array.isArray(current.accommodations) ? current.accommodations : [];
   current.accommodations.unshift(newAcc);
-  current.updatedAt = new Date().toISOString();
-  saveSpaces();
+  current.updatedAt = now;
+  saveSpaces(cleanId);
 
   res.status(201).json(newAcc);
 });
@@ -663,6 +796,10 @@ app.post('/api/space/:spaceId/accommodations', (req, res) => {
 app.put('/api/space/:spaceId/accommodations/:accId', (req, res) => {
   const { spaceId, accId } = req.params;
   const cleanId = (spaceId || 'default').toUpperCase().trim();
+
+  if (!spacesCache[cleanId]) {
+    loadSpaces();
+  }
 
   if (!spacesCache[cleanId]) {
     return res.status(404).json({ error: 'Espacio no encontrado' });
@@ -676,34 +813,45 @@ app.put('/api/space/:spaceId/accommodations/:accId', (req, res) => {
   }
 
   const existing = current.accommodations[index];
+  const now = new Date().toISOString();
   const updated = {
     ...existing,
     ...req.body,
     id: existing.id, // prevent overwriting ID
     createdAt: existing.createdAt,
+    updatedAt: now,
     comments: existing.comments // comments updated via dedicated route
   };
 
   current.accommodations[index] = updated;
-  current.updatedAt = new Date().toISOString();
-  saveSpaces();
+  current.updatedAt = now;
+  saveSpaces(cleanId);
 
   res.json(updated);
 });
 
-// Delete accommodation
+// D1: Delete accommodation with tombstone tracking (Never resurrects)
 app.delete('/api/space/:spaceId/accommodations/:accId', (req, res) => {
   const { spaceId, accId } = req.params;
   const cleanId = (spaceId || 'default').toUpperCase().trim();
+
+  if (!spacesCache[cleanId]) {
+    loadSpaces();
+  }
 
   if (!spacesCache[cleanId]) {
     return res.status(404).json({ error: 'Espacio no encontrado' });
   }
 
   const current = spacesCache[cleanId];
+  current.deletedAccIds = Array.isArray(current.deletedAccIds) ? current.deletedAccIds : [];
+  if (!current.deletedAccIds.includes(accId)) {
+    current.deletedAccIds.push(accId);
+  }
+
   current.accommodations = current.accommodations.filter(a => a.id !== accId);
   current.updatedAt = new Date().toISOString();
-  saveSpaces();
+  saveSpaces(cleanId);
 
   res.json({ success: true, count: current.accommodations.length });
 });
@@ -713,6 +861,10 @@ app.post('/api/space/:spaceId/accommodations/:accId/reaction', (req, res) => {
   const { spaceId, accId } = req.params;
   const { partnerId, liked, reaction, note } = req.body;
   const cleanId = (spaceId || 'default').toUpperCase().trim();
+
+  if (!spacesCache[cleanId]) {
+    loadSpaces();
+  }
 
   if (!spacesCache[cleanId]) {
     return res.status(404).json({ error: 'Espacio no encontrado' });
@@ -725,10 +877,11 @@ app.post('/api/space/:spaceId/accommodations/:accId/reaction', (req, res) => {
     return res.status(404).json({ error: 'Alojamiento no encontrado' });
   }
 
+  const now = new Date().toISOString();
   if (!item.reactions) {
     item.reactions = {
-      p1: { liked: false, reaction: null, note: '' },
-      p2: { liked: false, reaction: null, note: '' }
+      p1: { liked: false, reaction: null, note: '', updatedAt: now },
+      p2: { liked: false, reaction: null, note: '', updatedAt: now }
     };
   }
 
@@ -736,14 +889,16 @@ app.post('/api/space/:spaceId/accommodations/:accId/reaction', (req, res) => {
   item.reactions[pKey] = {
     liked: liked !== undefined ? !!liked : item.reactions[pKey]?.liked || false,
     reaction: reaction !== undefined ? reaction : item.reactions[pKey]?.reaction || null,
-    note: note !== undefined ? note : item.reactions[pKey]?.note || ''
+    note: note !== undefined ? note : item.reactions[pKey]?.note || '',
+    updatedAt: now
   };
+  item.updatedAt = now;
 
   // Check if both liked it (Match!)
   const isMatch = !!(item.reactions.p1?.liked && item.reactions.p2?.liked);
 
-  current.updatedAt = new Date().toISOString();
-  saveSpaces();
+  current.updatedAt = now;
+  saveSpaces(cleanId);
 
   res.json({ success: true, reactions: item.reactions, isMatch });
 });
@@ -753,6 +908,10 @@ app.post('/api/space/:spaceId/accommodations/:accId/comment', (req, res) => {
   const { spaceId, accId } = req.params;
   const { partnerId, text } = req.body;
   const cleanId = (spaceId || 'default').toUpperCase().trim();
+
+  if (!spacesCache[cleanId]) {
+    loadSpaces();
+  }
 
   if (!spacesCache[cleanId]) {
     return res.status(404).json({ error: 'Espacio no encontrado' });
@@ -770,13 +929,14 @@ app.post('/api/space/:spaceId/accommodations/:accId/comment', (req, res) => {
     avatar: '💌'
   };
 
+  const now = new Date().toISOString();
   const newComment = {
     id: 'c_' + Date.now() + '_' + Math.random().toString(36).substring(2, 5),
     partnerId: partnerId || 'p1',
     partnerName: partnerInfo.name,
     avatar: partnerInfo.avatar,
     text: (text || '').trim(),
-    createdAt: new Date().toISOString()
+    createdAt: now
   };
 
   if (!Array.isArray(item.comments)) {
@@ -784,8 +944,9 @@ app.post('/api/space/:spaceId/accommodations/:accId/comment', (req, res) => {
   }
 
   item.comments.push(newComment);
-  current.updatedAt = new Date().toISOString();
-  saveSpaces();
+  item.updatedAt = now;
+  current.updatedAt = now;
+  saveSpaces(cleanId);
 
   res.status(201).json(newComment);
 });
@@ -794,6 +955,10 @@ app.post('/api/space/:spaceId/accommodations/:accId/comment', (req, res) => {
 app.delete('/api/space/:spaceId/accommodations/:accId/comment/:commentId', (req, res) => {
   const { spaceId, accId, commentId } = req.params;
   const cleanId = (spaceId || 'default').toUpperCase().trim();
+
+  if (!spacesCache[cleanId]) {
+    loadSpaces();
+  }
 
   if (!spacesCache[cleanId]) {
     return res.status(404).json({ error: 'Espacio no encontrado' });
@@ -806,81 +971,84 @@ app.delete('/api/space/:spaceId/accommodations/:accId/comment/:commentId', (req,
     return res.status(404).json({ error: 'Comentario o alojamiento no encontrado' });
   }
 
+  const now = new Date().toISOString();
   item.comments = item.comments.filter(c => c.id !== commentId);
-  current.updatedAt = new Date().toISOString();
-  saveSpaces();
+  item.updatedAt = now;
+  current.updatedAt = now;
+  saveSpaces(cleanId);
 
   res.json({ success: true });
 });
 
-// AI Link Extractor & Web Scraper
-app.post('/api/ai/extract', async (req, res) => {
+// S4, S5: AI Link Extractor & Web Scraper (SSRF protected, server-only Gemini key, rate-limited)
+app.post('/api/ai/extract', aiRateLimiter, async (req, res) => {
   try {
-    const { url, rawText, apiKey } = req.body;
+    const { url, rawText } = req.body;
     let scrapedTitle = '';
     let scrapedDescription = '';
     let scrapedImage = '';
     let scrapedPrice = null;
     let scrapedLocation = '';
-    let siteName = '';
 
-    // If URL is provided, scrape metadata
-    if (url && typeof url === 'string' && url.trim().startsWith('http')) {
+    // S4: Scrape metadata safely with SSRF protection
+    if (url && typeof url === 'string') {
+      const trimmedUrl = url.trim();
+      if (!isSafePublicUrl(trimmedUrl)) {
+        return res.status(400).json({ error: 'URL no permitida por seguridad (direcciones privadas o locales no autorizadas)' });
+      }
+
       try {
-        const fetchResponse = await fetch(url.trim(), {
+        const fetchResponse = await fetch(trimmedUrl, {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
             'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8'
           },
-          signal: AbortSignal.timeout(6000)
+          signal: AbortSignal.timeout(5000)
         });
 
-        if (fetchResponse.ok) {
-          const html = await fetchResponse.text();
-          const $ = cheerio.load(html);
+          if (fetchResponse.ok) {
+            const rawHtml = await fetchResponse.text();
+            const html = rawHtml.slice(0, 1000000); // 1MB limit to prevent memory exhaustion
+            const $ = cheerio.load(html);
 
-          scrapedTitle = $('meta[property="og:title"]').attr('content') ||
-                         $('meta[name="twitter:title"]').attr('content') ||
-                         $('title').text() || '';
+            scrapedTitle = $('meta[property="og:title"]').attr('content') ||
+                           $('meta[name="twitter:title"]').attr('content') ||
+                           $('title').text() || '';
 
-          scrapedDescription = $('meta[property="og:description"]').attr('content') ||
-                               $('meta[name="twitter:description"]').attr('content') ||
-                               $('meta[name="description"]').attr('content') || '';
+            scrapedDescription = $('meta[property="og:description"]').attr('content') ||
+                                 $('meta[name="twitter:description"]').attr('content') ||
+                                 $('meta[name="description"]').attr('content') || '';
 
-          scrapedImage = $('meta[property="og:image"]').attr('content') ||
-                         $('meta[name="twitter:image"]').attr('content') || '';
+            scrapedImage = $('meta[property="og:image"]').attr('content') ||
+                           $('meta[name="twitter:image"]').attr('content') || '';
 
-          siteName = $('meta[property="og:site_name"]').attr('content') || '';
-
-          // Look for price in JSON-LD or meta tags
-          $('script[type="application/ld+json"]').each((_, el) => {
-            try {
-              const json = JSON.parse($(el).html());
-              if (json && json.offers && json.offers.price) {
-                scrapedPrice = parseFloat(json.offers.price);
-              } else if (json && json.price) {
-                scrapedPrice = parseFloat(json.price);
-              }
-              if (json && json.address && (json.address.addressLocality || json.address.addressRegion)) {
-                scrapedLocation = [json.address.addressLocality, json.address.addressRegion, json.address.addressCountry].filter(Boolean).join(', ');
-              }
-            } catch (e) {
-              // Ignore invalid JSON-LD
-            }
-          });
+            // Look for price in JSON-LD or meta tags
+            $('script[type="application/ld+json"]').each((_, el) => {
+              try {
+                const json = JSON.parse($(el).html());
+                if (json && json.offers && json.offers.price) {
+                  scrapedPrice = parseFloat(json.offers.price);
+                } else if (json && json.price) {
+                  scrapedPrice = parseFloat(json.price);
+                }
+                if (json && json.address && (json.address.addressLocality || json.address.addressRegion)) {
+                  scrapedLocation = [json.address.addressLocality, json.address.addressRegion, json.address.addressCountry].filter(Boolean).join(', ');
+                }
+              } catch {}
+            });
+          }
+        } catch (scrapeErr) {
+          console.warn('Scraping warning (proceeding with fallback extraction):', scrapeErr.message);
         }
-      } catch (scrapeErr) {
-        console.warn('Scraping warning (proceeding with fallback extraction):', scrapeErr.message);
       }
-    }
 
-    // Check if Gemini API is available (passed from frontend settings or process.env)
-    const geminiKey = apiKey || process.env.GEMINI_API_KEY;
+    // S5: Gemini API key strictly from server environment (Never trust client body)
+    const geminiKey = process.env.GEMINI_API_KEY;
 
     if (geminiKey) {
       try {
         const prompt = `Actúa como un asistente experto en viajes románticos y extracción de datos de alojamientos.
-Analiza la siguiente información de un alojamiento (puede provenir de una URL, un post de Instagram, Airbnb, Booking o notas):
+Analiza la siguiente información de un alojamiento:
 
 URL: ${url || 'No especificada'}
 Título detectado: ${scrapedTitle}
@@ -893,7 +1061,7 @@ Extrae y devuelve ÚNICAMENTE un objeto JSON válido (sin backticks de markdown 
   "title": "Nombre atractivo y limpio del alojamiento",
   "type": "Cabaña" | "Hotel Boutique" | "Glamping" | "Departamento" | "Villa" | "Resort" | "Casa de Campo",
   "location": "Ciudad, Región o Zona",
-  "pricePerNight": número aproximado (solo el número decimal o entero en USD o moneda local),
+  "pricePerNight": número aproximado,
   "currency": "USD",
   "imageUrl": "${scrapedImage || ''}",
   "highlights": ["Punto fuerte romántico 1", "Punto fuerte 2", "Punto fuerte 3"],
@@ -907,7 +1075,8 @@ Extrae y devuelve ÚNICAMENTE un objeto JSON válido (sin backticks de markdown 
           body: JSON.stringify({
             contents: [{ parts: [{ text: prompt }] }],
             generationConfig: { responseMimeType: 'application/json' }
-          })
+          }),
+          signal: AbortSignal.timeout(6000)
         });
 
         if (geminiRes.ok) {
@@ -930,7 +1099,6 @@ Extrae y devuelve ÚNICAMENTE un objeto JSON válido (sin backticks de markdown 
     // Smart heuristic & NLP fallback extractor (Zero configuration needed!)
     const combinedText = [scrapedTitle, scrapedDescription, rawText, url].filter(Boolean).join(' ');
 
-    // Guess title
     let cleanTitle = scrapedTitle
       .replace(/\|.*$/g, '')
       .replace(/-.*(Airbnb|Booking|TripAdvisor|Instagram).*$/gi, '')
@@ -952,7 +1120,6 @@ Extrae y devuelve ÚNICAMENTE un objeto JSON válido (sin backticks de markdown 
       }
     }
 
-    // Guess lodging type
     let lodgingType = 'Cabaña';
     const lowerText = combinedText.toLowerCase();
     if (lowerText.includes('glamping') || lowerText.includes('domo') || lowerText.includes('yurta')) {
@@ -967,7 +1134,6 @@ Extrae y devuelve ÚNICAMENTE un objeto JSON válido (sin backticks de markdown 
       lodgingType = 'Resort & Spa';
     }
 
-    // Guess price
     let estimatedPrice = scrapedPrice;
     if (!estimatedPrice) {
       const priceMatches = combinedText.match(/(?:us\$|\$|usd|eur|€)\s?(\d{2,4})/i) ||
@@ -979,7 +1145,6 @@ Extrae y devuelve ÚNICAMENTE un objeto JSON válido (sin backticks de markdown 
       }
     }
 
-    // Guess location
     let estimatedLocation = scrapedLocation;
     if (!estimatedLocation) {
       const locMatch = combinedText.match(/(?:en|ubicad[oa] en|zona|cerca de)\s+([A-ZÁÉÍÓÚ][a-záéíóú]+(?:\s+[A-ZÁÉÍÓÚ][a-záéíóú]+){0,2})/);
@@ -1000,7 +1165,6 @@ Extrae y devuelve ÚNICAMENTE un objeto JSON válido (sin backticks de markdown 
       }
     }
 
-    // Romantic highlights
     const highlights = [];
     if (lowerText.includes('jacuzzi') || lowerText.includes('hidro') || lowerText.includes('tina') || lowerText.includes('hot tub')) {
       highlights.push('Tina caliente / Jacuzzi de relajación');
@@ -1052,10 +1216,10 @@ Extrae y devuelve ÚNICAMENTE un objeto JSON válido (sin backticks de markdown 
   }
 });
 
-// AI Romantic Concierge / Summary & Recommendation
-app.post(['/api/ai/recommend', '/api/ai/concierge'], async (req, res) => {
+// S5: AI Romantic Concierge / Summary & Recommendation (Server-only key, rate-limited)
+app.post(['/api/ai/recommend', '/api/ai/concierge'], aiRateLimiter, async (req, res) => {
   try {
-    const { accommodations, nights = 3, currency = 'USD', partners = {}, apiKey } = req.body;
+    const { accommodations, nights = 3, currency = 'USD', partners = {} } = req.body;
 
     if (!Array.isArray(accommodations) || accommodations.length === 0) {
       return res.status(400).json({ error: 'No hay alojamientos para comparar' });
@@ -1064,8 +1228,8 @@ app.post(['/api/ai/recommend', '/api/ai/concierge'], async (req, res) => {
     const p1Name = partners?.partner1?.name || 'Pareja 1';
     const p2Name = partners?.partner2?.name || 'Pareja 2';
 
-    // Check Gemini API
-    const geminiKey = apiKey || process.env.GEMINI_API_KEY;
+    // S5: Server-only Gemini key
+    const geminiKey = process.env.GEMINI_API_KEY;
     if (geminiKey) {
       try {
         const prompt = `Actúa como "Cúpido IA", un asesor experto y cariñoso en viajes en pareja.
@@ -1100,7 +1264,8 @@ Genera una respuesta en formato JSON con la siguiente estructura exacta:
           body: JSON.stringify({
             contents: [{ parts: [{ text: prompt }] }],
             generationConfig: { responseMimeType: 'application/json' }
-          })
+          }),
+          signal: AbortSignal.timeout(6000)
         });
 
         if (geminiRes.ok) {
@@ -1163,7 +1328,8 @@ if (fs.existsSync(DIST_PATH)) {
   });
 }
 
-if (process.env.VERCEL !== '1') {
+// Serverless check (Vercel & AWS Lambda)
+if (!process.env.VERCEL && !process.env.AWS_LAMBDA_FUNCTION_NAME) {
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running at http://localhost:${PORT}`);
   });

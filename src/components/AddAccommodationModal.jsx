@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Sparkles, X, Link as LinkIcon, Image, MapPin, DollarSign, Check, RefreshCw } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Sparkles, X, Link as LinkIcon, MapPin, Check, RefreshCw } from 'lucide-react';
 
 const RANDOM_PHOTOS = [
   'https://images.unsplash.com/photo-1587061949409-02df41d5e562?auto=format&fit=crop&w=1200&q=80',
@@ -18,7 +18,7 @@ export default function AddAccommodationModal({
   onAdd,
   currentPartnerId,
   currency = 'USD',
-  apiKey = ''
+  initialItem = null
 }) {
   const [extractUrl, setExtractUrl] = useState('');
   const [extractNotes, setExtractNotes] = useState('');
@@ -35,6 +35,50 @@ export default function AddAccommodationModal({
   const [description, setDescription] = useState('');
   const [highlightsInput, setHighlightsInput] = useState('');
   const [consInput, setConsInput] = useState('');
+
+  // U5: Synchronize form state if editing an existing item
+  useEffect(() => {
+    if (initialItem) {
+      setTitle(initialItem.title || '');
+      setType(initialItem.type || 'Cabaña');
+      setLocation(initialItem.location || '');
+      setPricePerNight(initialItem.pricePerNight || '');
+      setImageUrl(initialItem.imageUrl || RANDOM_PHOTOS[0]);
+      setLink(initialItem.link || '');
+      setDescription(initialItem.description || '');
+      setHighlightsInput(Array.isArray(initialItem.highlights) ? initialItem.highlights.join('\n') : '');
+      setConsInput(Array.isArray(initialItem.cons) ? initialItem.cons.join('\n') : '');
+    } else {
+      setTitle('');
+      setType('Cabaña');
+      setLocation('');
+      setPricePerNight('');
+      setImageUrl(RANDOM_PHOTOS[Math.floor(Math.random() * RANDOM_PHOTOS.length)]);
+      setLink('');
+      setDescription('');
+      setHighlightsInput('');
+      setConsInput('');
+      setExtractUrl('');
+      setExtractNotes('');
+    }
+  }, [initialItem, isOpen]);
+
+  // Q7: Body scroll lock & U6: Escape key listener
+  useEffect(() => {
+    if (!isOpen) return;
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -53,13 +97,13 @@ export default function AddAccommodationModal({
     setExtractSuccess(false);
 
     try {
+      // S5: Call server without sending client apiKey
       const res = await fetch('/api/ai/extract', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           url: extractUrl.trim(),
-          rawText: extractNotes.trim(),
-          apiKey
+          rawText: extractNotes.trim()
         })
       });
 
@@ -109,7 +153,8 @@ export default function AddAccommodationModal({
       .map((s) => s.trim())
       .filter(Boolean);
 
-    onAdd({
+    const payload = {
+      ...(initialItem || {}),
       title: title.trim(),
       type,
       location: location.trim() || 'Zona a coordinar',
@@ -120,80 +165,92 @@ export default function AddAccommodationModal({
       description: description.trim(),
       highlights: highlights.length > 0 ? highlights : ['Ideal para descansar en pareja'],
       cons,
-      addedBy: currentPartnerId
-    });
+      addedBy: initialItem ? initialItem.addedBy || currentPartnerId : currentPartnerId
+    };
 
+    onAdd(payload);
     onClose();
   };
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div
+      className="modal-overlay"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label={initialItem ? "Editar Alojamiento" : "Nuevo Alojamiento"}
+    >
       <div className="modal-content" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h3>
-            <span>✨</span>
-            <span>Nuevo Alojamiento</span>
+            <span aria-hidden="true">✨</span>
+            <span>{initialItem ? 'Editar Alojamiento' : 'Nuevo Alojamiento'}</span>
           </h3>
-          <button className="close-btn" onClick={onClose}>
+          <button className="close-btn" onClick={onClose} aria-label="Cerrar modal">
             <X size={18} />
           </button>
         </div>
 
-        {/* AI Extractor Box */}
-        <div className="ai-extract-box">
-          <div className="ai-box-title">
-            <span style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-              <Sparkles size={16} />
-              <span>Extracción Automática con IA</span>
-            </span>
-            {extractSuccess && (
-              <span style={{ color: 'var(--mint-500)', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.2rem' }}>
-                <Check size={14} /> ¡Datos extraídos con éxito!
-              </span>
-            )}
-          </div>
-          <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
-            Pega el enlace de <strong>Airbnb, Booking, Instagram, Google Maps</strong> o una descripción y la IA autocompletará los detalles.
-          </p>
+        {/* AI Quick Extractor Banner (only on new item) */}
+        {!initialItem && (
+          <div className="ai-extractor-box">
+            <div className="ai-box-header">
+              <Sparkles size={16} color="var(--rose-600)" />
+              <span className="ai-box-title">Extracción Inteligente con IA</span>
+              <span className="ai-badge">Automático</span>
+            </div>
+            <p className="ai-box-desc">
+              Pega el enlace de Airbnb, Booking o Instagram, o pega notas. La IA completará fotos, precios y detalles:
+            </p>
 
-          <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.6rem' }}>
-            <input
-              type="url"
-              placeholder="https://www.airbnb.com/... o https://instagram.com/..."
-              value={extractUrl}
-              onChange={(e) => setExtractUrl(e.target.value)}
-              className="form-input"
-              style={{ fontSize: '0.88rem' }}
-            />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '0.6rem' }}>
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <input
+                  type="url"
+                  placeholder="https://www.airbnb.com/rooms/... o post de Instagram"
+                  value={extractUrl}
+                  onChange={(e) => setExtractUrl(e.target.value)}
+                  className="form-input"
+                  style={{ fontSize: '0.85rem' }}
+                />
+              </div>
+
+              <textarea
+                placeholder="O pega notas copiadas del alojamiento..."
+                value={extractNotes}
+                onChange={(e) => setExtractNotes(e.target.value)}
+                className="form-textarea"
+                rows="2"
+                style={{ fontSize: '0.8rem', minHeight: '52px' }}
+              />
+            </div>
+
             <button
               type="button"
-              className="btn btn-sparkle"
+              className="btn btn-primary btn-sm"
               onClick={handleAiExtract}
               disabled={isExtracting}
+              style={{ width: '100%', gap: '0.4rem' }}
             >
               {isExtracting ? (
                 <>
-                  <RefreshCw size={14} className="spin-animate" />
-                  <span>Analizando...</span>
+                  <RefreshCw size={14} className="animate-spin" />
+                  <span>Analizando con IA...</span>
+                </>
+              ) : extractSuccess ? (
+                <>
+                  <Check size={14} color="#10B981" />
+                  <span>¡Datos extraídos con éxito!</span>
                 </>
               ) : (
                 <>
-                  <Sparkles size={15} />
-                  <span>Extraer</span>
+                  <Sparkles size={14} />
+                  <span>Analizar y Auto-completar</span>
                 </>
               )}
             </button>
           </div>
-
-          <textarea
-            placeholder="Opcional: pega texto o notas adicionales para que la IA lo interprete..."
-            value={extractNotes}
-            onChange={(e) => setExtractNotes(e.target.value)}
-            className="form-textarea"
-            rows="2"
-            style={{ fontSize: '0.82rem', resize: 'vertical' }}
-          />
-        </div>
+        )}
 
         {/* Manual Form */}
         <form onSubmit={handleSubmit}>
@@ -201,7 +258,7 @@ export default function AddAccommodationModal({
             <label className="form-label">Nombre del Alojamiento *</label>
             <input
               type="text"
-              placeholder="Ej: Cabaña Vista al Lago con Tina Caliente"
+              placeholder="Ej: Cabaña Las Araucarias & Tina Caliente"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               className="form-input"
@@ -209,45 +266,48 @@ export default function AddAccommodationModal({
             />
           </div>
 
-          <div className="form-row">
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
             <div className="form-group">
-              <label className="form-label">Tipo de Alojamiento</label>
+              <label className="form-label">Tipo de Lugar</label>
               <select
                 value={type}
                 onChange={(e) => setType(e.target.value)}
                 className="form-select"
               >
-                <option value="Cabaña">Cabaña Romántica</option>
+                <option value="Cabaña">Cabaña</option>
                 <option value="Hotel Boutique">Hotel Boutique</option>
-                <option value="Glamping">Glamping / Domo</option>
-                <option value="Departamento">Departamento / Loft</option>
+                <option value="Glamping">Glamping</option>
+                <option value="Departamento">Departamento</option>
                 <option value="Villa">Villa Privada</option>
-                <option value="Resort">Resort & Spa</option>
+                <option value="Resort & Spa">Resort & Spa</option>
+                <option value="Casa de Campo">Casa de Campo</option>
               </select>
             </div>
 
             <div className="form-group">
-              <label className="form-label">Precio por Noche ({currency || 'USD'}) *</label>
+              <label className="form-label">Precio por Noche ({currency})</label>
               <input
-                type="number"
-                placeholder={currency === 'CLP' ? 'Ej: 85000' : currency === 'ARS' ? 'Ej: 95000' : 'Ej: 120'}
+                type="text"
+                placeholder="Ej: 80000 o 135"
                 value={pricePerNight}
                 onChange={(e) => setPricePerNight(e.target.value)}
                 className="form-input"
-                required
               />
             </div>
           </div>
 
           <div className="form-group">
-            <label className="form-label">Ubicación / Zona</label>
-            <input
-              type="text"
-              placeholder="Ej: Bariloche, Circuito Chico o Playa del Carmen"
-              value={location}
-              onChange={(e) => setLocation(e.target.value)}
-              className="form-input"
-            />
+            <label className="form-label">Ubicación / Ciudad</label>
+            <div style={{ position: 'relative' }}>
+              <input
+                type="text"
+                placeholder="Ej: Bariloche, Puerto Varas, Mendoza..."
+                value={location}
+                onChange={(e) => setLocation(e.target.value)}
+                className="form-input"
+              />
+              <MapPin size={16} color="var(--text-muted)" style={{ position: 'absolute', right: '12px', top: '12px' }} />
+            </div>
           </div>
 
           <div className="form-group">
@@ -286,13 +346,16 @@ export default function AddAccommodationModal({
 
           <div className="form-group">
             <label className="form-label">Link Original (Airbnb, Instagram, etc.)</label>
-            <input
-              type="url"
-              placeholder="https://..."
-              value={link}
-              onChange={(e) => setLink(e.target.value)}
-              className="form-input"
-            />
+            <div style={{ position: 'relative' }}>
+              <input
+                type="url"
+                placeholder="https://..."
+                value={link}
+                onChange={(e) => setLink(e.target.value)}
+                className="form-input"
+              />
+              <LinkIcon size={16} color="var(--text-muted)" style={{ position: 'absolute', right: '12px', top: '12px' }} />
+            </div>
           </div>
 
           <div className="form-group">
@@ -333,7 +396,7 @@ export default function AddAccommodationModal({
               Cancelar
             </button>
             <button type="submit" className="btn btn-primary">
-              Guardar en Nuestro Nido 💕
+              {initialItem ? 'Guardar Cambios 💕' : 'Guardar en Nuestro Nido 💕'}
             </button>
           </div>
         </form>

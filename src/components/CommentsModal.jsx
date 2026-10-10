@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { X, Send, Trash2 } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { X, Send } from 'lucide-react';
 import { formatCurrencyPrice } from '../utils/formatters';
 
 export default function CommentsModal({
@@ -13,6 +13,23 @@ export default function CommentsModal({
   currency
 }) {
   const [commentText, setCommentText] = useState('');
+
+  // Q7: Body scroll lock & U6: Escape key listener
+  useEffect(() => {
+    if (!isOpen) return;
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isOpen, onClose]);
 
   if (!isOpen || !item) return null;
 
@@ -35,18 +52,24 @@ export default function CommentsModal({
   };
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div
+      className="modal-overlay"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Notas de Pareja"
+    >
       <div className="modal-content" style={{ maxWidth: '520px' }} onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <div>
             <h3 style={{ fontSize: '1.25rem', margin: 0 }}>
-              <span>💬</span> Notas de Pareja
+              <span aria-hidden="true">💬</span> Notas de Pareja
             </h3>
             <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>
               {item.title}
             </p>
           </div>
-          <button className="close-btn" onClick={onClose}>
+          <button className="close-btn" onClick={onClose} aria-label="Cerrar modal">
             <X size={18} />
           </button>
         </div>
@@ -76,7 +99,7 @@ export default function CommentsModal({
         <div style={{ maxHeight: '300px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.85rem', paddingRight: '0.25rem', marginBottom: '1.25rem' }}>
           {comments.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '2rem 1rem', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
-              <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>💌</div>
+              <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }} aria-hidden="true">💌</div>
               No hay mensajitos todavía. ¡Sé quien deje la primera nota sobre este lugar!
             </div>
           ) : (
@@ -92,7 +115,7 @@ export default function CommentsModal({
                   }}
                 >
                   <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginBottom: '0.2rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                    <span>{c.avatar}</span>
+                    <span aria-hidden="true">{c.avatar}</span>
                     <span>{c.partnerName}</span>
                   </div>
 
@@ -114,6 +137,7 @@ export default function CommentsModal({
 
                   {isMine && onDeleteComment && (
                     <button
+                      type="button"
                       onClick={() => onDeleteComment(item.id, c.id)}
                       style={{
                         background: 'none',
@@ -124,6 +148,7 @@ export default function CommentsModal({
                         marginTop: '0.2rem'
                       }}
                       title="Eliminar este comentario"
+                      aria-label="Eliminar este comentario"
                     >
                       Borrar
                     </button>
@@ -143,9 +168,10 @@ export default function CommentsModal({
             onChange={(e) => setCommentText(e.target.value)}
             className="form-input"
             style={{ fontSize: '0.88rem' }}
+            aria-label="Mensaje para tu pareja"
             autoFocus
           />
-          <button type="submit" className="btn btn-primary btn-sm" disabled={!commentText.trim()}>
+          <button type="submit" className="btn btn-primary btn-sm" disabled={!commentText.trim()} aria-label="Enviar mensaje">
             <Send size={15} />
           </button>
         </form>

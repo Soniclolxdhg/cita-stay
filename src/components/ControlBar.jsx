@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutGrid, Table, ArrowUpDown, Filter, Sparkles } from 'lucide-react';
+import { LayoutGrid, Table, ArrowUpDown } from 'lucide-react';
 
 export default function ControlBar({
   activeFilter,

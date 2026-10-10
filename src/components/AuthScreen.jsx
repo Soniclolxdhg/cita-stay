@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Heart, Sparkles, Key, Users, ArrowRight, Check, Compass } from 'lucide-react';
+import React, { useState } from 'react';
+import { Sparkles, ArrowRight, Compass, Mail } from 'lucide-react';
 import GoogleAuthModal from './GoogleAuthModal';
 
 const AVATARS_1 = ['🌸', '🦊', '🐱', '🐰', '🥑', '🌺', '✨', '🍓'];
@@ -20,7 +20,7 @@ export default function AuthScreen({
   const [p2Avatar, setP2Avatar] = useState('🐻');
   const [tripName, setTripName] = useState('');
   const [pin, setPin] = useState('');
-  const [withExamples, setWithExamples] = useState(false); // Default: Empty list, clean for real use!
+  const [withExamples, setWithExamples] = useState(false);
 
   // Join form state
   const [joinCode, setJoinCode] = useState(initialSpaceId || '');
@@ -58,6 +58,9 @@ export default function AuthScreen({
 
       const data = await res.json();
       if (data.success && data.space) {
+        if (data.token) {
+          localStorage.setItem(`cita_token_${data.space.id}`, data.token);
+        }
         onLoginSuccess(data.space.id, 'p1', data.space);
       } else {
         setError(data.error || 'Error al crear el espacio');
@@ -102,7 +105,7 @@ export default function AuthScreen({
           }
         }
       }
-    } catch (_) {}
+    } catch {}
     return list;
   }, []);
 
@@ -118,13 +121,6 @@ export default function AuthScreen({
 
     const cleanCode = joinCode.trim().toUpperCase();
 
-    // 1. Check local cache first so device memory is prioritized
-    let localData = null;
-    try {
-      const cached = localStorage.getItem(`cita_cache_${cleanCode}`);
-      if (cached) localData = JSON.parse(cached);
-    } catch (_) {}
-
     try {
       const res = await fetch('/api/auth/join-space', {
         method: 'POST',
@@ -137,37 +133,33 @@ export default function AuthScreen({
       });
 
       const data = await res.json();
-      if (data.success && data.space) {
-        // If local copy has more accommodations, prefer local
-        const finalSpace = (localData && (localData.accommodations?.length || 0) > (data.space.accommodations?.length || 0))
-          ? localData
-          : data.space;
-        onLoginSuccess(finalSpace.id, joinPartner, finalSpace);
+      if (res.ok && data.success && data.space) {
+        if (data.token) {
+          localStorage.setItem(`cita_token_${cleanCode}`, data.token);
+        }
+        onLoginSuccess(data.space.id, joinPartner, data.space);
+        return;
+      } else {
+        setError(data.error || 'Código o PIN incorrecto. Por favor verifica.');
         return;
       }
     } catch (err) {
       console.warn('Network issue during join:', err);
+      // Only if truly offline, check if we have a cached local copy
+      try {
+        const cached = localStorage.getItem(`cita_cache_${cleanCode}`);
+        if (cached) {
+          const localData = JSON.parse(cached);
+          if (localData && localData.id) {
+            onLoginSuccess(cleanCode, joinPartner, localData);
+            return;
+          }
+        }
+      } catch {}
+      setError('No se pudo conectar con el servidor. Verifica tu conexión a internet.');
+    } finally {
+      setLoading(false);
     }
-
-    // 2. If server was idle/fresh but we have it locally, log in immediately!
-    if (localData) {
-      onLoginSuccess(cleanCode, joinPartner, localData);
-      return;
-    }
-
-    // 3. Fallback: connect to this code so user is never locked out
-    const fallbackSpace = {
-      id: cleanCode,
-      name: `Nido ${cleanCode} 💕`,
-      nights: 3,
-      currency: 'CLP',
-      partners: {
-        partner1: { id: 'p1', name: 'Pareja 1', avatar: '🌸', color: '#F472B6' },
-        partner2: { id: 'p2', name: 'Pareja 2', avatar: '🐻', color: '#818CF8' }
-      },
-      accommodations: []
-    };
-    onLoginSuccess(cleanCode, joinPartner, fallbackSpace);
   };
 
   return (
@@ -176,83 +168,94 @@ export default function AuthScreen({
         <div className="auth-card">
           {/* Logo and title */}
           <div className="auth-brand">
-          <div className="auth-icon-badge">💕</div>
-          <h1 className="font-serif">Cita <span>Stay</span></h1>
-          <p className="auth-subtitle">
-            El comparador romántico y privado para viajar de a dos
-          </p>
-        </div>
-
-        {/* Saved Spaces on this device */}
-        {savedSpaces.length > 0 && (
-          <div style={{
-            background: 'linear-gradient(135deg, rgba(254, 242, 242, 0.95), rgba(250, 245, 255, 0.95))',
-            border: '2px solid var(--rose-200)',
-            borderRadius: 'var(--radius-lg)',
-            padding: '1rem',
-            marginBottom: '1.25rem',
-            textAlign: 'left'
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontWeight: 700, fontSize: '0.85rem', color: 'var(--rose-600)', marginBottom: '0.65rem' }}>
-              <Sparkles size={15} />
-              <span>Tus Nidos Guardados en este dispositivo:</span>
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              {savedSpaces.map((s) => (
-                <div key={s.id} style={{
-                  background: 'white',
-                  borderRadius: 'var(--radius-md)',
-                  padding: '0.75rem 0.85rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  boxShadow: 'var(--shadow-subtle)',
-                  border: '1px solid var(--rose-100)',
-                  gap: '0.5rem'
-                }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 700, fontSize: '0.88rem', color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      {s.name || 'Nuestra Escapada'}
-                    </div>
-                    <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', marginTop: '0.1rem' }}>
-                      Código: <strong style={{ color: 'var(--rose-600)' }}>{s.id}</strong> • {s.accommodations?.length || 0} lugares • {s.partners?.partner1?.name || 'Pareja 1'} & {s.partners?.partner2?.name || 'Pareja 2'}
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    className="btn btn-primary btn-sm"
-                    onClick={() => onLoginSuccess(s.id, 'p1', s)}
-                    style={{ whiteSpace: 'nowrap', flexShrink: 0, padding: '0.35rem 0.75rem', fontSize: '0.8rem' }}
-                  >
-                    Entrar 💕
-                  </button>
-                </div>
-              ))}
-            </div>
+            <div className="auth-icon-badge" aria-hidden="true">💕</div>
+            <h1 className="font-serif">Cita <span>Stay</span></h1>
+            <p className="auth-subtitle">
+              El comparador romántico y privado para viajar de a dos
+            </p>
           </div>
-        )}
 
-        {/* Google One-Click Login Button */}
-        <button
-          type="button"
-          className="btn-google-sign-in"
-          onClick={() => setIsGoogleModalOpen(true)}
-          title="Iniciar sesión y guardar con tu cuenta de Google"
-        >
-          <svg width="20" height="20" viewBox="0 0 24 24" style={{ flexShrink: 0 }}>
-            <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.8-2.4 3.66v3.05h3.87c2.26-2.09 3.675-5.17 3.675-9.15z" />
-            <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.87-3.05c-1.08.72-2.45 1.16-4.06 1.16-3.13 0-5.78-2.11-6.73-4.96H1.27v3.15C3.26 21.36 7.36 24 12 24z" />
-            <path fill="#FBBC05" d="M5.27 14.24c-.25-.72-.38-1.49-.38-2.24s.13-1.52.38-2.24V6.61H1.27C.46 8.23 0 10.06 0 12s.46 3.77 1.27 5.39l4-3.15z" />
-            <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.36 0 3.26 2.64 1.27 6.61l4 3.15c.95-2.85 3.6-4.96 6.73-4.96z" />
-          </svg>
-          <span>Continuar con Google</span>
-        </button>
+          {/* Saved Spaces on this device */}
+          {savedSpaces.length > 0 && (
+            <div style={{
+              background: 'linear-gradient(135deg, rgba(254, 242, 242, 0.95), rgba(250, 245, 255, 0.95))',
+              border: '2px solid var(--rose-200)',
+              borderRadius: 'var(--radius-lg)',
+              padding: '1rem',
+              marginBottom: '1.25rem',
+              textAlign: 'left'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontWeight: 700, fontSize: '0.85rem', color: 'var(--rose-600)', marginBottom: '0.65rem' }}>
+                <Sparkles size={15} />
+                <span>Tus Nidos Guardados en este dispositivo:</span>
+              </div>
 
-        <div className="auth-divider">
-          <span>o acceder con código privado</span>
-        </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                {savedSpaces.map((s) => (
+                  <div key={s.id} style={{
+                    background: 'white',
+                    borderRadius: 'var(--radius-md)',
+                    padding: '0.75rem 0.85rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    boxShadow: 'var(--shadow-subtle)',
+                    border: '1px solid var(--rose-100)',
+                    gap: '0.5rem'
+                  }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, fontSize: '0.88rem', color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {s.name || 'Nuestra Escapada'}
+                      </div>
+                      <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', marginTop: '0.1rem' }}>
+                        Código: <strong style={{ color: 'var(--rose-600)' }}>{s.id}</strong> • {s.accommodations?.length || 0} lugares • {s.partners?.partner1?.name || 'Pareja 1'} & {s.partners?.partner2?.name || 'Pareja 2'}
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      onClick={() => onLoginSuccess(s.id, 'p1', s)}
+                      style={{ whiteSpace: 'nowrap', flexShrink: 0, padding: '0.35rem 0.75rem', fontSize: '0.8rem' }}
+                    >
+                      Entrar 💕
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Honest Email Access / Recovery Button (Fixes U1) */}
+          <button
+            type="button"
+            className="btn-google-sign-in"
+            onClick={() => setIsGoogleModalOpen(true)}
+            title="Guardar o recuperar tu nido permanentemente con tu correo"
+            style={{
+              background: 'white',
+              border: '1.5px solid var(--rose-200)',
+              color: 'var(--text-primary)',
+              boxShadow: '0 2px 6px rgba(244, 114, 182, 0.12)'
+            }}
+          >
+            <div style={{
+              background: 'var(--rose-100)',
+              color: 'var(--rose-600)',
+              padding: '0.3rem',
+              borderRadius: 'var(--radius-pill)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}>
+              <Mail size={16} />
+            </div>
+            <span style={{ fontWeight: 600 }}>Acceder o Respaldar con Email</span>
+          </button>
+
+          <div className="auth-divider">
+            <span>o acceder con código privado</span>
+          </div>
 
         {/* Tab switch */}
         <div className="auth-tabs">

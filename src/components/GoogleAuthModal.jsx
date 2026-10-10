@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Check, ArrowRight } from 'lucide-react';
+import { X, ArrowRight, Mail } from 'lucide-react';
 
 export default function GoogleAuthModal({
   isOpen,
@@ -18,12 +18,29 @@ export default function GoogleAuthModal({
     setMounted(true);
   }, []);
 
+  // Q7: Body scroll lock & U6: Escape key listener
+  useEffect(() => {
+    if (!isOpen) return;
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isOpen, onClose]);
+
   if (!isOpen || !mounted) return null;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!email.trim() || !email.includes('@')) {
-      setError('Por favor ingresa un correo electrónico de Google válido');
+      setError('Por favor ingresa un correo electrónico válido');
       return;
     }
 
@@ -34,33 +51,34 @@ export default function GoogleAuthModal({
     const displayName = (name || cleanEmail.split('@')[0]).trim();
 
     try {
-      const res = await fetch('/api/auth/google', {
+      const res = await fetch('/api/auth/email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email: cleanEmail,
           name: displayName,
-          partnerName: partnerName.trim() || 'Mi Pareja',
-          picture: `https://api.dicebear.com/7.x/bottts/svg?seed=${cleanEmail}`
+          partnerName: partnerName.trim() || 'Mi Pareja'
         })
       });
 
       const data = await res.json();
       if (data.success && data.space) {
+        if (data.token) {
+          localStorage.setItem(`cita_token_${data.space.id}`, data.token);
+        }
         onGoogleSuccess({
           googleUser: {
             email: cleanEmail,
-            name: displayName,
-            picture: `https://api.dicebear.com/7.x/bottts/svg?seed=${cleanEmail}`
+            name: displayName
           },
           space: data.space
         });
         onClose();
       } else {
-        setError(data.error || 'No se pudo iniciar sesión con Google.');
+        setError(data.error || 'No se pudo conectar con este email.');
       }
     } catch (err) {
-      console.warn('Backend unavailable, saving Google session offline:', err);
+      console.warn('Backend unavailable, saving session offline:', err);
       // Offline fallback
       const randomDigits = Math.floor(1000 + Math.random() * 9000);
       const offlineId = `AMOR-${randomDigits}`;
@@ -69,7 +87,7 @@ export default function GoogleAuthModal({
         name: `Nido de ${displayName} & ${partnerName.trim() || 'Mi Pareja'} 💕`,
         nights: 3,
         currency: 'CLP',
-        googleOwner: { email: cleanEmail, name: displayName },
+        ownerEmail: cleanEmail,
         partners: {
           partner1: { id: 'p1', name: displayName, avatar: '🌸', color: '#F472B6' },
           partner2: { id: 'p2', name: partnerName.trim() || 'Mi Pareja', avatar: '🐻', color: '#818CF8' }
@@ -88,26 +106,42 @@ export default function GoogleAuthModal({
   };
 
   return createPortal(
-    <div className="modal-overlay" onClick={onClose} style={{ zIndex: 99999 }}>
+    <div
+      className="modal-overlay"
+      onClick={onClose}
+      style={{ zIndex: 99999 }}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Acceso y Respaldo por Email"
+    >
       <div className="modal-content" style={{ maxWidth: '440px', padding: '2rem 1.75rem', margin: 'auto' }} onClick={(e) => e.stopPropagation()}>
         <div className="modal-header" style={{ marginBottom: '1rem' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-            {/* Official Google G Logo */}
-            <svg width="24" height="24" viewBox="0 0 24 24">
-              <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.8-2.4 3.66v3.05h3.87c2.26-2.09 3.675-5.17 3.675-9.15z" />
-              <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.87-3.05c-1.08.72-2.45 1.16-4.06 1.16-3.13 0-5.78-2.11-6.73-4.96H1.27v3.15C3.26 21.36 7.36 24 12 24z" />
-              <path fill="#FBBC05" d="M5.27 14.24c-.25-.72-.38-1.49-.38-2.24s.13-1.52.38-2.24V6.61H1.27C.46 8.23 0 10.06 0 12s.46 3.77 1.27 5.39l4-3.15z" />
-              <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.36 0 3.26 2.64 1.27 6.61l4 3.15c.95-2.85 3.6-4.96 6.73-4.96z" />
-            </svg>
-            <h3 style={{ margin: 0, fontSize: '1.25rem' }}>Iniciar con Google</h3>
+            <div style={{
+              background: 'var(--rose-100)',
+              color: 'var(--rose-600)',
+              padding: '0.5rem',
+              borderRadius: 'var(--radius-pill)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}>
+              <Mail size={22} />
+            </div>
+            <div>
+              <h3 style={{ margin: 0, fontSize: '1.25rem' }}>Acceso por Email</h3>
+              <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                Guarda o recupera tu nido sin perder datos
+              </p>
+            </div>
           </div>
-          <button className="close-btn" onClick={onClose}>
+          <button className="close-btn" onClick={onClose} aria-label="Cerrar modal">
             <X size={18} />
           </button>
         </div>
 
         <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1.25rem', lineHeight: '1.4' }}>
-          Vincula tu cuenta de Google para que tu nido y tus alojamientos queden <strong>guardados permanentemente</strong> y puedas acceder siempre desde cualquier celular o PC.
+          Ingresa tu correo para que tu nido y tus alojamientos queden <strong>respaldados</strong>. Podrás ingresar siempre desde cualquier dispositivo usando el mismo email.
         </p>
 
         {error && (
@@ -118,10 +152,10 @@ export default function GoogleAuthModal({
 
         <form onSubmit={handleSubmit}>
           <div className="form-group">
-            <label className="form-label">Tu Correo de Google / Gmail *</label>
+            <label className="form-label">Tu Correo Electrónico *</label>
             <input
               type="email"
-              placeholder="tu.correo@gmail.com"
+              placeholder="tu.correo@ejemplo.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="form-input"
@@ -142,7 +176,7 @@ export default function GoogleAuthModal({
           </div>
 
           <div className="form-group">
-            <label className="form-label">Nombre de tu Pareja</label>
+            <label className="form-label">Nombre de tu Pareja (Opcional)</label>
             <input
               type="text"
               placeholder="Ej: Valen, Nico, etc."
@@ -159,10 +193,10 @@ export default function GoogleAuthModal({
             disabled={loading}
           >
             {loading ? (
-              <span>Vinculando con Google...</span>
+              <span>Conectando...</span>
             ) : (
               <span style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', justifyContent: 'center' }}>
-                <span>Continuar y Guardar en mi Cuenta</span>
+                <span>Continuar y Respaldar Nido</span>
                 <ArrowRight size={16} />
               </span>
             )}

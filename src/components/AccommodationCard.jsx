@@ -1,14 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
-  Heart, 
   MapPin, 
   ExternalLink, 
   MessageCircle, 
   Trash2, 
   Check, 
   AlertCircle, 
-  Sparkles, 
-  Plus,
   Edit2
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
@@ -22,6 +19,7 @@ export default function AccommodationCard({
   currentPartnerId,
   onToggleReaction,
   onOpenComments,
+  onEdit,
   onDelete
 }) {
   const p1 = partners.partner1 || { name: 'Cami', avatar: '🌸' };
@@ -39,14 +37,24 @@ export default function AccommodationCard({
     currentPartnerId === 'p2' ? p2Reaction.note || '' : p1Reaction.note || ''
   );
 
+  // U4: Refresh note state when switching partner or when reaction updates
+  useEffect(() => {
+    const myNote = currentPartnerId === 'p2' ? p2Reaction.note : p1Reaction.note;
+    setCurrentNote(myNote || '');
+  }, [currentPartnerId, p1Reaction.note, p2Reaction.note]);
+
+  // U3: Enforce single partner identity: you can only vote as your own partner identity
   const handleHeartClick = (partnerId) => {
+    if (partnerId !== currentPartnerId) {
+      return; // Cannot toggle heart for the other partner!
+    }
+
     const currentLiked = partnerId === 'p2' ? p2Reaction.liked : p1Reaction.liked;
     const nextLiked = !currentLiked;
 
     // Check if this action creates a new match!
     const otherLiked = partnerId === 'p2' ? p1Reaction.liked : p2Reaction.liked;
     if (nextLiked && otherLiked) {
-      // Fire romantic confetti!
       confetti({
         particleCount: 80,
         spread: 70,
@@ -74,7 +82,7 @@ export default function AccommodationCard({
       {/* Match Banner */}
       {isMatch && (
         <div className="match-banner">
-          <span>💕</span>
+          <span aria-hidden="true">💕</span>
           <span>¡Es un Match!</span>
         </div>
       )}
@@ -101,7 +109,7 @@ export default function AccommodationCard({
         </div>
 
         <div className="card-location">
-          <MapPin size={14} color="#FB7185" />
+          <MapPin size={14} color="#FB7185" aria-hidden="true" />
           <span>{item.location || 'Ubicación a coordinar'}</span>
         </div>
 
@@ -131,7 +139,7 @@ export default function AccommodationCard({
           <div className="highlights-list">
             {item.highlights.slice(0, 3).map((h, idx) => (
               <div key={idx} className="highlight-item">
-                <Check size={14} className="highlight-icon" />
+                <Check size={14} className="highlight-icon" aria-hidden="true" />
                 <span>{h}</span>
               </div>
             ))}
@@ -143,7 +151,7 @@ export default function AccommodationCard({
           <div style={{ marginBottom: '1rem' }}>
             {item.cons.slice(0, 2).map((c, idx) => (
               <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8rem', color: '#D97706' }}>
-                <AlertCircle size={13} />
+                <AlertCircle size={13} aria-hidden="true" />
                 <span>{c}</span>
               </div>
             ))}
@@ -175,13 +183,24 @@ export default function AccommodationCard({
             <div className={`partner-vote-card ${p1Reaction.liked ? 'voted' : ''}`}>
               <div className="vote-header">
                 <span className="vote-name">
-                  <span>{p1.avatar}</span>
+                  <span aria-hidden="true">{p1.avatar}</span>
                   <span>{p1.name}</span>
                 </span>
                 <button
+                  type="button"
                   className={`heart-toggle-btn ${p1Reaction.liked ? 'liked' : ''}`}
                   onClick={() => handleHeartClick('p1')}
-                  title={`Voto de ${p1.name}. Toca para cambiar.`}
+                  disabled={currentPartnerId !== 'p1'}
+                  title={
+                    currentPartnerId === 'p1'
+                      ? (p1Reaction.liked ? 'Quitar mi corazón' : 'Dar mi corazón 💕')
+                      : `Voto de ${p1.name} (solo ${p1.name} puede votar aquí)`
+                  }
+                  aria-label={`Voto de ${p1.name}`}
+                  style={{
+                    opacity: currentPartnerId === 'p1' ? 1 : 0.75,
+                    cursor: currentPartnerId === 'p1' ? 'pointer' : 'default'
+                  }}
                 >
                   {p1Reaction.liked ? '❤️' : '🤍'}
                 </button>
@@ -200,13 +219,24 @@ export default function AccommodationCard({
             <div className={`partner-vote-card ${p2Reaction.liked ? 'voted' : ''}`}>
               <div className="vote-header">
                 <span className="vote-name">
-                  <span>{p2.avatar}</span>
+                  <span aria-hidden="true">{p2.avatar}</span>
                   <span>{p2.name}</span>
                 </span>
                 <button
+                  type="button"
                   className={`heart-toggle-btn ${p2Reaction.liked ? 'liked' : ''}`}
                   onClick={() => handleHeartClick('p2')}
-                  title={`Voto de ${p2.name}. Toca para cambiar.`}
+                  disabled={currentPartnerId !== 'p2'}
+                  title={
+                    currentPartnerId === 'p2'
+                      ? (p2Reaction.liked ? 'Quitar mi corazón' : 'Dar mi corazón 💕')
+                      : `Voto de ${p2.name} (solo ${p2.name} puede votar aquí)`
+                  }
+                  aria-label={`Voto de ${p2.name}`}
+                  style={{
+                    opacity: currentPartnerId === 'p2' ? 1 : 0.75,
+                    cursor: currentPartnerId === 'p2' ? 'pointer' : 'default'
+                  }}
                 >
                   {p2Reaction.liked ? '❤️' : '🤍'}
                 </button>
@@ -233,15 +263,21 @@ export default function AccommodationCard({
                   onChange={(e) => setCurrentNote(e.target.value)}
                   className="form-input"
                   style={{ padding: '0.35rem 0.65rem', fontSize: '0.8rem' }}
-                  onKeyDown={(e) => e.key === 'Enter' && handleSaveNote()}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleSaveNote();
+                    }
+                  }}
                   autoFocus
                 />
-                <button className="btn btn-primary btn-sm" onClick={handleSaveNote}>
+                <button type="button" className="btn btn-primary btn-sm" onClick={handleSaveNote}>
                   Guardar
                 </button>
               </div>
             ) : (
               <button
+                type="button"
                 className="btn btn-secondary btn-sm"
                 style={{ width: '100%', fontSize: '0.78rem', padding: '0.3rem', borderStyle: 'dashed' }}
                 onClick={() => setEditingNote(true)}
@@ -260,9 +296,11 @@ export default function AccommodationCard({
         {/* Card Footer Actions */}
         <div className="card-footer" style={{ marginTop: '1rem' }}>
           <button
+            type="button"
             className="comment-trigger"
             onClick={() => onOpenComments(item)}
             title="Abrir charla y mensajitos de pareja"
+            aria-label="Abrir mensajes del alojamiento"
           >
             <MessageCircle size={15} color="#FB7185" />
             <span>
@@ -273,22 +311,38 @@ export default function AccommodationCard({
           </button>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            {/* U5: Edit Accommodation Button */}
+            {onEdit && (
+              <button
+                type="button"
+                className="btn btn-secondary btn-icon btn-sm"
+                onClick={() => onEdit(item)}
+                title="Editar este alojamiento"
+                aria-label="Editar este alojamiento"
+              >
+                <Edit2 size={14} />
+              </button>
+            )}
+
             {item.link && (
               <a
                 href={item.link}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="btn btn-secondary btn-icon btn-sm"
-                title="Abrir enlace original (Airbnb, Booking, Instagram, etc.)"
+                title="Abrir enlace original"
+                aria-label="Abrir enlace original"
               >
                 <ExternalLink size={14} />
               </a>
             )}
 
             <button
+              type="button"
               className="btn btn-secondary btn-icon btn-sm"
               onClick={() => onDelete(item.id)}
               title="Eliminar este alojamiento"
+              aria-label="Eliminar este alojamiento"
               style={{ color: '#EF4444' }}
             >
               <Trash2 size={14} />
