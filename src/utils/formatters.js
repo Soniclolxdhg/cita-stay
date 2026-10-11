@@ -102,3 +102,91 @@ export function getPlatformInfo(link) {
   }
   return { name: 'Web', icon: '🔗', label: 'Ver Alojamiento', color: 'var(--rose-600)' };
 }
+
+/**
+ * Deduplicates an array of accommodations by ID, or by content fingerprint (title + link/image/location).
+ * Preserves the richest / newest data and merges reactions and comments without losing votes.
+ */
+export function deduplicateAccommodations(accommodations) {
+  if (!Array.isArray(accommodations)) return [];
+  const idMap = new Map();
+  const contentMap = new Map();
+
+  for (const acc of accommodations) {
+    if (!acc) continue;
+    const safeId = acc.id ? String(acc.id) : null;
+    const cleanTitle = (acc.title || '').trim().toLowerCase();
+    const cleanLink = normalizeUrl(acc.link || '').toLowerCase();
+    const cleanImg = (acc.imageUrl || '').trim();
+    const cleanLoc = (acc.location || '').trim().toLowerCase();
+
+    // Fingerprint represents the real-world place
+    const fingerprint = cleanTitle 
+      ? `${cleanTitle}:::${cleanLink || cleanImg || cleanLoc}`
+      : (safeId || Math.random().toString());
+
+    // Check if seen by safeId or fingerprint
+    let existingKey = null;
+    if (safeId && idMap.has(safeId)) {
+      existingKey = idMap.get(safeId);
+    } else if (contentMap.has(fingerprint)) {
+      existingKey = contentMap.get(fingerprint);
+    }
+
+    if (!existingKey) {
+      const key = safeId || ('acc_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6));
+      const normalizedAcc = { ...acc, id: key };
+      if (safeId) idMap.set(safeId, key);
+      contentMap.set(fingerprint, key);
+      idMap.set(key, normalizedAcc);
+    } else {
+      const existing = idMap.get(existingKey);
+      if (existing) {
+        const existingTime = new Date(existing.updatedAt || existing.createdAt || 0).getTime();
+        const newTime = new Date(acc.updatedAt || acc.createdAt || 0).getTime();
+        const base = newTime >= existingTime ? { ...existing, ...acc, id: existing.id } : { ...acc, ...existing, id: existing.id };
+
+        // Merge reactions (so hearts / notes from either duplicate are kept)
+        const mergedReactions = {
+          p1: (acc.reactions?.p1?.liked !== undefined ? acc.reactions.p1 : existing.reactions?.p1) || { liked: false, note: '' },
+          p2: (acc.reactions?.p2?.liked !== undefined ? acc.reactions.p2 : existing.reactions?.p2) || { liked: false, note: '' }
+        };
+        if (existing.reactions?.p1?.liked || acc.reactions?.p1?.liked) {
+          mergedReactions.p1 = { ...(existing.reactions?.p1 || {}), ...(acc.reactions?.p1 || {}), liked: true };
+        }
+        if (existing.reactions?.p2?.liked || acc.reactions?.p2?.liked) {
+          mergedReactions.p2 = { ...(existing.reactions?.p2 || {}), ...(acc.reactions?.p2 || {}), liked: true };
+        }
+
+        // Merge comments by id
+        const commentMap = new Map();
+        for (const c of (existing.comments || [])) {
+          if (c && (c.id || c.text)) commentMap.set(c.id || `${c.partnerId}_${c.text}`, c);
+        }
+        for (const c of (acc.comments || [])) {
+          if (c && (c.id || c.text)) commentMap.set(c.id || `${c.partnerId}_${c.text}`, c);
+        }
+        const mergedComments = Array.from(commentMap.values()).sort(
+          (a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime()
+        );
+
+        idMap.set(existingKey, {
+          ...base,
+          reactions: mergedReactions,
+          comments: mergedComments,
+          updatedAt: new Date(Math.max(existingTime, newTime, Date.now())).toISOString()
+        });
+      }
+    }
+  }
+
+  const uniqueItems = [];
+  const seenIds = new Set();
+  for (const val of idMap.values()) {
+    if (val && typeof val === 'object' && val.id && !seenIds.has(val.id)) {
+      seenIds.add(val.id);
+      uniqueItems.push(val);
+    }
+  }
+  return uniqueItems;
+}

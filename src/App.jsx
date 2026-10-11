@@ -14,6 +14,7 @@ import AuthScreen from './components/AuthScreen';
 import SharePartnerModal from './components/SharePartnerModal';
 import { Plus } from 'lucide-react';
 import confetti from 'canvas-confetti';
+import { deduplicateAccommodations } from './utils/formatters';
 
 export default function App() {
   // Determine Space ID purely from URL param ?space=XYZ or localStorage without side-effects (Fixes Q5)
@@ -266,7 +267,7 @@ export default function App() {
             }
           };
 
-          // 2. Accommodations LWW Merge (Never resurrect deleted items!)
+          // 2. Accommodations LWW Merge with Content Deduplication
           const serverAccs = Array.isArray(serverData.accommodations) ? serverData.accommodations : [];
           const localAccs = Array.isArray(localData.accommodations) ? localData.accommodations : [];
 
@@ -279,14 +280,33 @@ export default function App() {
             }
           }
 
-          // Server items merged with Last-Write-Wins
+          // Server items merged with Last-Write-Wins and content fingerprint reconciliation
           for (const sAcc of serverAccs) {
             if (!sAcc || !sAcc.id || combinedDeleted.has(sAcc.id)) continue;
             
+            // Check if server item matches any local item by ID or content fingerprint
+            let matchKey = sAcc.id;
             if (!accMap.has(sAcc.id)) {
+              for (const [key, lAcc] of accMap.entries()) {
+                if (
+                  lAcc.title && sAcc.title &&
+                  lAcc.title.trim().toLowerCase() === sAcc.title.trim().toLowerCase() &&
+                  (
+                    (lAcc.link && sAcc.link && lAcc.link === sAcc.link) ||
+                    (lAcc.imageUrl && sAcc.imageUrl && lAcc.imageUrl === sAcc.imageUrl) ||
+                    (lAcc.location && sAcc.location && lAcc.location.trim().toLowerCase() === sAcc.location.trim().toLowerCase())
+                  )
+                ) {
+                  matchKey = key;
+                  break;
+                }
+              }
+            }
+
+            if (!accMap.has(matchKey)) {
               accMap.set(sAcc.id, sAcc);
             } else {
-              const lAcc = accMap.get(sAcc.id);
+              const lAcc = accMap.get(matchKey);
               const sTime = new Date(sAcc.updatedAt || 0).getTime();
               const lTime = new Date(lAcc.updatedAt || 0).getTime();
 
@@ -295,27 +315,33 @@ export default function App() {
               // Merge comments by unique id
               const commentMap = new Map();
               for (const c of (lAcc.comments || [])) {
-                if (c && c.id) commentMap.set(c.id, c);
+                if (c && (c.id || c.text)) commentMap.set(c.id || `${c.partnerId}_${c.text}`, c);
               }
               for (const c of (sAcc.comments || [])) {
-                if (c && c.id) commentMap.set(c.id, c);
+                if (c && (c.id || c.text)) commentMap.set(c.id || `${c.partnerId}_${c.text}`, c);
               }
               const mergedComments = Array.from(commentMap.values()).sort(
                 (a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime()
               );
 
+              // If matchKey was a different local temporary ID, delete it so server ID takes precedence
+              if (matchKey !== sAcc.id) {
+                accMap.delete(matchKey);
+              }
+
               accMap.set(sAcc.id, {
                 ...base,
+                id: sAcc.id,
                 reactions: {
-                  p1: sAcc.reactions?.p1?.liked !== undefined ? sAcc.reactions.p1 : lAcc.reactions?.p1,
-                  p2: sAcc.reactions?.p2?.liked !== undefined ? sAcc.reactions.p2 : lAcc.reactions?.p2
+                  p1: (sAcc.reactions?.p1?.liked !== undefined ? sAcc.reactions.p1 : lAcc.reactions?.p1) || { liked: false, note: '' },
+                  p2: (sAcc.reactions?.p2?.liked !== undefined ? sAcc.reactions.p2 : lAcc.reactions?.p2) || { liked: false, note: '' }
                 },
                 comments: mergedComments
               });
             }
           }
 
-          const mergedAccs = Array.from(accMap.values());
+          const mergedAccs = deduplicateAccommodations(Array.from(accMap.values()));
 
           const mergedName = (localData.name && localData.name !== 'Nuestra Escapada Romántica 💕')
             ? localData.name
@@ -455,19 +481,40 @@ export default function App() {
         comments: accData.comments || []
       };
 
-      updateSpaceData((prev) => ({
-        ...prev,
-        accommodations: [fullItem, ...prev.accommodations.filter((a) => a.id !== fullItem.id)]
-      }), true);
+      updateSpaceData((prev) => {
+        const withoutDuplicates = prev.accommodations.filter(
+          (a) => a.id !== fullItem.id && !(
+            a.title && fullItem.title &&
+            a.title.trim().toLowerCase() === fullItem.title.trim().toLowerCase() &&
+            ((a.link && fullItem.link && a.link === fullItem.link) ||
+             (a.imageUrl && fullItem.imageUrl && a.imageUrl === fullItem.imageUrl))
+          )
+        );
+        return {
+          ...prev,
+          accommodations: deduplicateAccommodations([fullItem, ...withoutDuplicates])
+        };
+      }, false);
 
       showToast('¡Alojamiento agregado a la lista! 💕');
 
       try {
-        await fetch(`/api/space/${spaceId}/accommodations`, {
+        const res = await fetch(`/api/space/${spaceId}/accommodations`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(fullItem)
         });
+        if (res.ok) {
+          const savedItem = await res.json();
+          if (savedItem && savedItem.id && savedItem.id !== fullItem.id) {
+            updateSpaceData((prev) => ({
+              ...prev,
+              accommodations: deduplicateAccommodations(
+                prev.accommodations.map((a) => (a.id === fullItem.id ? savedItem : a))
+              )
+            }), false);
+          }
+        }
       } catch (err) {
         console.warn('Network issue adding accommodation, saved locally:', err);
       }
@@ -604,24 +651,29 @@ export default function App() {
     }
   };
 
+  // Derived unique accommodations (purges any duplicate cards)
+  const uniqueAccommodations = useMemo(() => {
+    return deduplicateAccommodations(spaceData.accommodations);
+  }, [spaceData.accommodations]);
+
   // Derived counts
   const matchesCount = useMemo(() => {
-    return spaceData.accommodations.filter(
+    return uniqueAccommodations.filter(
       (a) => a.reactions?.p1?.liked && a.reactions?.p2?.liked
     ).length;
-  }, [spaceData.accommodations]);
+  }, [uniqueAccommodations]);
 
   const lodgingTypes = useMemo(() => {
     const types = new Set();
-    spaceData.accommodations.forEach((a) => {
+    uniqueAccommodations.forEach((a) => {
       if (a.type) types.add(a.type);
     });
     return Array.from(types);
-  }, [spaceData.accommodations]);
+  }, [uniqueAccommodations]);
 
   // Filtered & Sorted items
   const displayItems = useMemo(() => {
-    let items = [...spaceData.accommodations];
+    let items = [...uniqueAccommodations];
 
     // Filter
     if (activeFilter === 'matches') {
@@ -649,7 +701,7 @@ export default function App() {
     }
 
     return items;
-  }, [spaceData.accommodations, activeFilter, sortBy]);
+  }, [uniqueAccommodations, activeFilter, sortBy]);
 
   // If not logged in / no active space session, show welcoming couple Auth Screen
   if (!isAuthenticated) {
@@ -693,7 +745,7 @@ export default function App() {
           currency={spaceData.currency}
           onUpdateTrip={handleUpdateTrip}
           partners={spaceData.partners}
-          totalCount={spaceData.accommodations.length}
+          totalCount={uniqueAccommodations.length}
           matchesCount={matchesCount}
         />
 
@@ -710,7 +762,7 @@ export default function App() {
         />
 
         {/* Content Display: Grid or Table */}
-        {loading && spaceData.accommodations.length === 0 ? (
+        {loading && uniqueAccommodations.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '4rem 1rem' }}>
             <div style={{ fontSize: '2rem', animation: 'pulseGentle 1.5s infinite' }}>💕</div>
             <p style={{ color: 'var(--text-muted)', marginTop: '0.5rem' }}>Cargando su espacio romántico...</p>

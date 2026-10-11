@@ -109,12 +109,105 @@ function isSafePublicUrl(urlString) {
   }
 }
 
-// S3: Sanitize space data before returning to client (Strip PIN & tokens)
+function normalizeUrl(url) {
+  if (!url || typeof url !== 'string') return '';
+  const trimmed = url.trim();
+  if (!trimmed) return '';
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  return `https://${trimmed}`;
+}
+
+function deduplicateAccommodations(accommodations) {
+  if (!Array.isArray(accommodations)) return [];
+  const idMap = new Map();
+  const contentMap = new Map();
+
+  for (const acc of accommodations) {
+    if (!acc) continue;
+    const safeId = acc.id ? String(acc.id) : null;
+    const cleanTitle = (acc.title || '').trim().toLowerCase();
+    const cleanLink = normalizeUrl(acc.link || '').toLowerCase();
+    const cleanImg = (acc.imageUrl || '').trim();
+    const cleanLoc = (acc.location || '').trim().toLowerCase();
+
+    // Fingerprint represents the real-world place
+    const fingerprint = cleanTitle 
+      ? `${cleanTitle}:::${cleanLink || cleanImg || cleanLoc}`
+      : (safeId || Math.random().toString());
+
+    // Check if seen by safeId or fingerprint
+    let existingKey = null;
+    if (safeId && idMap.has(safeId)) {
+      existingKey = idMap.get(safeId);
+    } else if (contentMap.has(fingerprint)) {
+      existingKey = contentMap.get(fingerprint);
+    }
+
+    if (!existingKey) {
+      const key = safeId || ('acc_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6));
+      const normalizedAcc = { ...acc, id: key };
+      if (safeId) idMap.set(safeId, key);
+      contentMap.set(fingerprint, key);
+      idMap.set(key, normalizedAcc);
+    } else {
+      const existing = idMap.get(existingKey);
+      if (existing) {
+        const existingTime = new Date(existing.updatedAt || existing.createdAt || 0).getTime();
+        const newTime = new Date(acc.updatedAt || acc.createdAt || 0).getTime();
+        const base = newTime >= existingTime ? { ...existing, ...acc, id: existing.id } : { ...acc, ...existing, id: existing.id };
+
+        // Merge reactions (so hearts / notes from either duplicate are kept)
+        const mergedReactions = {
+          p1: (acc.reactions?.p1?.liked !== undefined ? acc.reactions.p1 : existing.reactions?.p1) || { liked: false, note: '' },
+          p2: (acc.reactions?.p2?.liked !== undefined ? acc.reactions.p2 : existing.reactions?.p2) || { liked: false, note: '' }
+        };
+        if (existing.reactions?.p1?.liked || acc.reactions?.p1?.liked) {
+          mergedReactions.p1 = { ...(existing.reactions?.p1 || {}), ...(acc.reactions?.p1 || {}), liked: true };
+        }
+        if (existing.reactions?.p2?.liked || acc.reactions?.p2?.liked) {
+          mergedReactions.p2 = { ...(existing.reactions?.p2 || {}), ...(acc.reactions?.p2 || {}), liked: true };
+        }
+
+        // Merge comments by id
+        const commentMap = new Map();
+        for (const c of (existing.comments || [])) {
+          if (c && (c.id || c.text)) commentMap.set(c.id || `${c.partnerId}_${c.text}`, c);
+        }
+        for (const c of (acc.comments || [])) {
+          if (c && (c.id || c.text)) commentMap.set(c.id || `${c.partnerId}_${c.text}`, c);
+        }
+        const mergedComments = Array.from(commentMap.values()).sort(
+          (a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime()
+        );
+
+        idMap.set(existingKey, {
+          ...base,
+          reactions: mergedReactions,
+          comments: mergedComments,
+          updatedAt: new Date(Math.max(existingTime, newTime, Date.now())).toISOString()
+        });
+      }
+    }
+  }
+
+  const uniqueItems = [];
+  const seenIds = new Set();
+  for (const val of idMap.values()) {
+    if (val && typeof val === 'object' && val.id && !seenIds.has(val.id)) {
+      seenIds.add(val.id);
+      uniqueItems.push(val);
+    }
+  }
+  return uniqueItems;
+}
+
+// S3: Sanitize space data before returning to client (Strip PIN & tokens, deduplicate accommodations)
 function sanitizeSpace(space) {
   if (!space) return null;
   const { pin, tokens: _tokens, _isFreshInit: _fresh, ...publicSpace } = space;
   return {
     ...publicSpace,
+    accommodations: deduplicateAccommodations(publicSpace.accommodations),
     hasPin: Boolean(pin && String(pin).trim().length > 0)
   };
 }
@@ -486,27 +579,37 @@ function saveSpaces(spaceIdToPersist = null) {
 // Unified space retriever: memory -> disk -> Supabase -> Upstash
 async function getOrLoadSpace(cleanId) {
   if (!cleanId) return null;
-  if (spacesCache[cleanId]) return spacesCache[cleanId];
-  loadSpaces();
-  if (spacesCache[cleanId]) return spacesCache[cleanId];
+  let space = spacesCache[cleanId];
+  if (!space) {
+    loadSpaces();
+    space = spacesCache[cleanId];
+  }
 
-  if (dbPool) {
+  if (!space && dbPool) {
     const fromDb = await getSpaceFromDb(cleanId);
     if (fromDb) {
       spacesCache[cleanId] = fromDb;
-      return fromDb;
+      space = fromDb;
     }
   }
 
-  if (KV_URL && KV_TOKEN) {
+  if (!space && KV_URL && KV_TOKEN) {
     const fromCloud = await getSpaceFromCloud(cleanId);
     if (fromCloud) {
       spacesCache[cleanId] = fromCloud;
-      return fromCloud;
+      space = fromCloud;
     }
   }
 
-  return null;
+  if (space && Array.isArray(space.accommodations)) {
+    const originalLen = space.accommodations.length;
+    space.accommodations = deduplicateAccommodations(space.accommodations);
+    if (space.accommodations.length !== originalLen) {
+      saveSpaces(cleanId);
+    }
+  }
+
+  return space;
 }
 
 loadSpaces();
@@ -1160,7 +1263,7 @@ app.post('/api/space/:spaceId/sync', async (req, res) => {
       }
     },
     deletedAccIds: Array.from(allDeletedSet),
-    accommodations: Array.from(accMap.values()),
+    accommodations: deduplicateAccommodations(Array.from(accMap.values())),
     updatedAt: new Date().toISOString()
   };
 
@@ -1221,33 +1324,61 @@ app.post('/api/space/:spaceId/accommodations', async (req, res) => {
   if (!current) {
     return res.status(404).json({ error: 'Nido no encontrado' });
   }
+
+  current.accommodations = Array.isArray(current.accommodations) ? current.accommodations : [];
+
   const now = new Date().toISOString();
+  const targetId = req.body.id || ('acc_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6));
+
+  const cleanTitle = (req.body.title || '').trim().toLowerCase();
+  const cleanLink = normalizeUrl(req.body.link || '').toLowerCase();
+  const cleanImg = (req.body.imageUrl || '').trim();
+
+  // Check if an accommodation with this id or matching content fingerprint already exists
+  const existingMatch = current.accommodations.find(a => 
+    a.id === targetId ||
+    (
+      cleanTitle && a.title &&
+      a.title.trim().toLowerCase() === cleanTitle &&
+      (
+        (cleanLink && a.link && normalizeUrl(a.link).toLowerCase() === cleanLink) ||
+        (cleanImg && a.imageUrl && a.imageUrl.trim() === cleanImg) ||
+        (a.location && req.body.location && a.location.trim().toLowerCase() === req.body.location.trim().toLowerCase())
+      )
+    )
+  );
+
+  if (existingMatch) {
+    // If it already exists, merge reactions/comments if provided and return existing item without duplicating
+    return res.status(200).json(existingMatch);
+  }
+
   const newAcc = {
-    id: 'acc_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+    id: targetId,
     title: req.body.title || 'Alojamiento Romántico',
     type: req.body.type || 'Cabaña',
     location: req.body.location || 'Zona por definir',
     pricePerNight: parseFloat(req.body.pricePerNight) || 100,
     currency: req.body.currency || current.currency || 'CLP',
     imageUrl: req.body.imageUrl || getRandomPhoto(),
-    link: req.body.link || '',
+    link: normalizeUrl(req.body.link || ''),
     description: req.body.description || '',
     highlights: Array.isArray(req.body.highlights) ? req.body.highlights : [],
     cons: Array.isArray(req.body.cons) ? req.body.cons : [],
     tags: Array.isArray(req.body.tags) ? req.body.tags : [],
     addedBy: req.body.addedBy || 'p1',
-    createdAt: now,
+    createdAt: req.body.createdAt || now,
     updatedAt: now,
     deletedAt: null,
     reactions: req.body.reactions || {
       p1: { liked: false, reaction: null, note: '', updatedAt: now },
       p2: { liked: false, reaction: null, note: '', updatedAt: now }
     },
-    comments: []
+    comments: Array.isArray(req.body.comments) ? req.body.comments : []
   };
 
-  current.accommodations = Array.isArray(current.accommodations) ? current.accommodations : [];
   current.accommodations.unshift(newAcc);
+  current.accommodations = deduplicateAccommodations(current.accommodations);
   current.updatedAt = now;
   saveSpaces(cleanId);
 
@@ -1372,18 +1503,31 @@ app.post('/api/space/:spaceId/accommodations/:accId/comment', async (req, res) =
   };
 
   const now = new Date().toISOString();
-  const newComment = {
-    id: 'c_' + Date.now() + '_' + Math.random().toString(36).substring(2, 5),
-    partnerId: partnerId || 'p1',
-    partnerName: partnerInfo.name,
-    avatar: partnerInfo.avatar,
-    text: (text || '').trim(),
-    createdAt: now
-  };
+  const commentId = req.body.id || ('c_' + Date.now() + '_' + Math.random().toString(36).substring(2, 5));
+  const trimmedText = (text || '').trim();
 
   if (!Array.isArray(item.comments)) {
     item.comments = [];
   }
+
+  // Check if identical comment was already added within the last 15 seconds or with same ID
+  const existingComment = item.comments.find(c => 
+    c.id === commentId || 
+    (c.partnerId === (partnerId || 'p1') && c.text === trimmedText && (Date.now() - new Date(c.createdAt || 0).getTime() < 15000))
+  );
+
+  if (existingComment) {
+    return res.status(200).json(existingComment);
+  }
+
+  const newComment = {
+    id: commentId,
+    partnerId: partnerId || 'p1',
+    partnerName: partnerInfo.name,
+    avatar: partnerInfo.avatar,
+    text: trimmedText,
+    createdAt: req.body.createdAt || now
+  };
 
   item.comments.push(newComment);
   item.updatedAt = now;

@@ -36,6 +36,7 @@ export default function AddAccommodationModal({
   const [description, setDescription] = useState('');
   const [highlightsInput, setHighlightsInput] = useState('');
   const [consInput, setConsInput] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // U5: Synchronize form state if editing an existing item
   useEffect(() => {
@@ -140,10 +141,14 @@ export default function AddAccommodationModal({
 
   const handleSubmit = (e) => {
     e.preventDefault();
+    if (isSubmitting) return;
+
     if (!title.trim()) {
       alert('Por favor ingresa al menos el nombre del lugar');
       return;
     }
+
+    setIsSubmitting(true);
 
     const highlights = highlightsInput
       .split('\n')
@@ -397,8 +402,8 @@ export default function AddAccommodationModal({
             <button type="button" className="btn btn-secondary" onClick={onClose}>
               Cancelar
             </button>
-            <button type="submit" className="btn btn-primary">
-              {initialItem ? 'Guardar Cambios 💕' : 'Guardar en Nuestro Nido 💕'}
+            <button type="submit" className="btn btn-primary" disabled={isSubmitting || isExtracting}>
+              {isSubmitting ? 'Guardando... 💕' : (initialItem ? 'Guardar Cambios 💕' : 'Guardar en Nuestro Nido 💕')}
             </button>
           </div>
         </form>
