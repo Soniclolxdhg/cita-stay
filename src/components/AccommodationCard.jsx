@@ -9,7 +9,7 @@ import {
   Edit2
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import { formatCurrencyPrice } from '../utils/formatters';
+import { formatCurrencyPrice, normalizeUrl, getPlatformInfo } from '../utils/formatters';
 
 export default function AccommodationCard({
   item,
@@ -31,6 +31,9 @@ export default function AccommodationCard({
   const isMatch = Boolean(p1Reaction.liked && p2Reaction.liked);
   const effectiveCurrency = currency || item.currency || 'USD';
   const rawTotalPrice = (parseFloat(item.pricePerNight) || 0) * (parseInt(nights, 10) || 1);
+
+  const cleanLink = normalizeUrl(item.link);
+  const platformInfo = getPlatformInfo(cleanLink);
 
   const [editingNote, setEditingNote] = useState(false);
   const [currentNote, setCurrentNote] = useState(
@@ -89,29 +92,86 @@ export default function AccommodationCard({
 
       {/* Media Image */}
       <div className="card-media">
-        <img
-          src={item.imageUrl}
-          alt={item.title}
-          className="card-img"
-          loading="lazy"
-          onError={(e) => {
-            e.target.onerror = null;
-            e.target.src = 'https://images.unsplash.com/photo-1587061949409-02df41d5e562?auto=format&fit=crop&w=1200&q=80';
-          }}
-        />
+        {cleanLink ? (
+          <a
+            href={cleanLink}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="card-media-clickable"
+            title={`Abrir ${platformInfo?.label || 'enlace original'} en nueva pestaña`}
+          >
+            <img
+              src={item.imageUrl}
+              alt={item.title}
+              className="card-img"
+              loading="lazy"
+              onError={(e) => {
+                e.target.onerror = null;
+                e.target.src = 'https://images.unsplash.com/photo-1587061949409-02df41d5e562?auto=format&fit=crop&w=1200&q=80';
+              }}
+            />
+            <div className="card-media-overlay-badge">
+              <span>{platformInfo?.icon || '🔗'}</span>
+              <span>{platformInfo?.label || 'Abrir enlace'} ↗</span>
+            </div>
+          </a>
+        ) : (
+          <img
+            src={item.imageUrl}
+            alt={item.title}
+            className="card-img"
+            loading="lazy"
+            onError={(e) => {
+              e.target.onerror = null;
+              e.target.src = 'https://images.unsplash.com/photo-1587061949409-02df41d5e562?auto=format&fit=crop&w=1200&q=80';
+            }}
+          />
+        )}
         <div className="card-type-badge">{item.type || 'Alojamiento'}</div>
       </div>
 
       {/* Card Content Body */}
       <div className="card-body">
         <div className="card-header-row">
-          <h3 className="card-title font-serif">{item.title}</h3>
+          <h3 className="card-title font-serif">
+            {cleanLink ? (
+              <a
+                href={cleanLink}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="card-title-link"
+                title={`Abrir ${platformInfo?.label || 'enlace original'} en nueva pestaña`}
+              >
+                <span>{item.title}</span>
+                <ExternalLink size={14} className="title-link-icon" aria-hidden="true" />
+              </a>
+            ) : (
+              <span>{item.title}</span>
+            )}
+          </h3>
         </div>
 
         <div className="card-location">
           <MapPin size={14} color="#FB7185" aria-hidden="true" />
           <span>{item.location || 'Ubicación a coordinar'}</span>
         </div>
+
+        {/* Prominent Platform Link Button */}
+        {cleanLink && platformInfo && (
+          <div style={{ marginBottom: '0.85rem' }}>
+            <a
+              href={cleanLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="platform-chip-btn"
+              title={`Abrir ${platformInfo.label} en nueva pestaña`}
+            >
+              <span>{platformInfo.icon}</span>
+              <span>{platformInfo.label}</span>
+              <ExternalLink size={13} style={{ marginLeft: 'auto' }} />
+            </a>
+          </div>
+        )}
 
         {/* Pricing Box */}
         <div className="price-display">

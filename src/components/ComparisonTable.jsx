@@ -1,6 +1,6 @@
 import React from 'react';
 import { ExternalLink, MessageCircle, Trash2, MapPin, Edit2 } from 'lucide-react';
-import { formatCurrencyPrice } from '../utils/formatters';
+import { formatCurrencyPrice, normalizeUrl, getPlatformInfo } from '../utils/formatters';
 
 export default function ComparisonTable({
   items,
@@ -45,37 +45,77 @@ export default function ComparisonTable({
             const effectiveCurrency = currency || item.currency || 'USD';
             const rawTotal = (parseFloat(item.pricePerNight) || 0) * (parseInt(nights, 10) || 1);
 
+            const cleanLink = normalizeUrl(item.link);
+            const platformInfo = getPlatformInfo(cleanLink);
+
             return (
               <tr key={item.id} className={isMatch ? 'table-match-row' : ''}>
                 {/* Title + Thumbnail */}
                 <td>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                    <img
-                      src={item.imageUrl}
-                      alt={item.title}
-                      style={{
-                        width: '46px',
-                        height: '46px',
-                        borderRadius: 'var(--radius-sm)',
-                        objectFit: 'cover',
-                        flexShrink: 0
-                      }}
-                      onError={(e) => {
-                        e.target.onerror = null;
-                        e.target.src = 'https://images.unsplash.com/photo-1587061949409-02df41d5e562?auto=format&fit=crop&w=400&q=80';
-                      }}
-                    />
-                    <div>
-                      <div style={{ fontWeight: 700, color: 'var(--text-primary)', fontSize: '0.9rem' }}>
-                        {item.title}
-                      </div>
-                      {item.highlights && item.highlights[0] && (
-                        <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
-                          ✨ {item.highlights[0]}
+                  {cleanLink ? (
+                    <a
+                      href={cleanLink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', textDecoration: 'none', color: 'inherit' }}
+                      title={`Abrir ${platformInfo?.label || 'enlace original'} en nueva pestaña`}
+                    >
+                      <img
+                        src={item.imageUrl}
+                        alt={item.title}
+                        style={{
+                          width: '46px',
+                          height: '46px',
+                          borderRadius: 'var(--radius-sm)',
+                          objectFit: 'cover',
+                          flexShrink: 0
+                        }}
+                        onError={(e) => {
+                          e.target.onerror = null;
+                          e.target.src = 'https://images.unsplash.com/photo-1587061949409-02df41d5e562?auto=format&fit=crop&w=400&q=80';
+                        }}
+                      />
+                      <div>
+                        <div style={{ fontWeight: 700, color: 'var(--rose-600)', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                          <span>{item.title}</span>
+                          <ExternalLink size={12} color="var(--rose-400)" />
                         </div>
-                      )}
+                        {item.highlights && item.highlights[0] && (
+                          <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+                            ✨ {item.highlights[0]}
+                          </div>
+                        )}
+                      </div>
+                    </a>
+                  ) : (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                      <img
+                        src={item.imageUrl}
+                        alt={item.title}
+                        style={{
+                          width: '46px',
+                          height: '46px',
+                          borderRadius: 'var(--radius-sm)',
+                          objectFit: 'cover',
+                          flexShrink: 0
+                        }}
+                        onError={(e) => {
+                          e.target.onerror = null;
+                          e.target.src = 'https://images.unsplash.com/photo-1587061949409-02df41d5e562?auto=format&fit=crop&w=400&q=80';
+                        }}
+                      />
+                      <div>
+                        <div style={{ fontWeight: 700, color: 'var(--text-primary)', fontSize: '0.9rem' }}>
+                          {item.title}
+                        </div>
+                        {item.highlights && item.highlights[0] && (
+                          <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+                            ✨ {item.highlights[0]}
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </td>
 
                 {/* Type */}
@@ -209,14 +249,14 @@ export default function ComparisonTable({
                         <Edit2 size={14} />
                       </button>
                     )}
-                    {item.link && (
+                    {cleanLink && (
                       <a
-                        href={item.link}
+                        href={cleanLink}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="btn btn-secondary btn-icon btn-sm"
-                        title="Abrir enlace original"
-                        aria-label="Abrir enlace original"
+                        title={`Abrir ${platformInfo?.label || 'enlace original'}`}
+                        aria-label={`Abrir ${platformInfo?.label || 'enlace original'}`}
                       >
                         <ExternalLink size={14} />
                       </a>

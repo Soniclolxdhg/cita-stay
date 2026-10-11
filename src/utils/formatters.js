@@ -69,3 +69,36 @@ export function formatCurrencyPrice(amount, curr = 'USD') {
   }
   return `${cleanCurr} $${formatted}`;
 }
+
+/**
+ * Normalizes any URL string by ensuring it has http:// or https:// prefix
+ */
+export function normalizeUrl(url) {
+  if (!url || typeof url !== 'string') return '';
+  const trimmed = url.trim();
+  if (!trimmed) return '';
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  return `https://${trimmed}`;
+}
+
+/**
+ * Detects the platform (Instagram, Airbnb, Booking, etc.) for friendly badge display
+ */
+export function getPlatformInfo(link) {
+  const clean = normalizeUrl(link);
+  if (!clean) return null;
+  const lower = clean.toLowerCase();
+  if (lower.includes('instagram.com') || lower.includes('instagr.am')) {
+    return { name: 'Instagram', icon: '📸', label: 'Ver en Instagram', color: '#E1306C' };
+  }
+  if (lower.includes('airbnb.')) {
+    return { name: 'Airbnb', icon: '🏠', label: 'Ver en Airbnb', color: '#FF5A5F' };
+  }
+  if (lower.includes('booking.')) {
+    return { name: 'Booking', icon: '🏨', label: 'Ver en Booking', color: '#003580' };
+  }
+  if (lower.includes('tiktok.com')) {
+    return { name: 'TikTok', icon: '🎵', label: 'Ver en TikTok', color: '#000000' };
+  }
+  return { name: 'Web', icon: '🔗', label: 'Ver Alojamiento', color: 'var(--rose-600)' };
+}

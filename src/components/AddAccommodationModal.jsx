@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Sparkles, X, Link as LinkIcon, MapPin, Check, RefreshCw } from 'lucide-react';
+import { normalizeUrl } from '../utils/formatters';
 
 const RANDOM_PHOTOS = [
   'https://images.unsplash.com/photo-1587061949409-02df41d5e562?auto=format&fit=crop&w=1200&q=80',
@@ -115,7 +116,8 @@ export default function AddAccommodationModal({
         if (item.location) setLocation(item.location);
         if (item.pricePerNight) setPricePerNight(item.pricePerNight);
         if (item.imageUrl) setImageUrl(item.imageUrl);
-        if (item.link) setLink(item.link);
+        const autoLink = item.link || extractUrl.trim();
+        if (autoLink) setLink(normalizeUrl(autoLink));
         if (item.description) setDescription(item.description);
         if (item.highlights && Array.isArray(item.highlights)) {
           setHighlightsInput(item.highlights.join('\n'));
@@ -161,7 +163,7 @@ export default function AddAccommodationModal({
       pricePerNight: parseFloat(pricePerNight) || 100,
       currency,
       imageUrl: imageUrl.trim() || RANDOM_PHOTOS[0],
-      link: link.trim() || extractUrl.trim(),
+      link: normalizeUrl(link.trim() || extractUrl.trim()),
       description: description.trim(),
       highlights: highlights.length > 0 ? highlights : ['Ideal para descansar en pareja'],
       cons,
